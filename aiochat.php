@@ -29,8 +29,9 @@ class AioChat extends Module
     public function install()
     {
         return parent::install()
-            && $this->registerHook('displayFooterAfter')
             && $this->registerHook('displayHeader')
+            && $this->registerHook('displayFooter')
+            && $this->registerHook('displayBeforeBodyClosingTag')
             && $this->createTables();
     }
 
@@ -188,14 +189,25 @@ class AioChat extends Module
         return '';
     }
 
-    public function hookDisplayFooterAfter($params)
+    public function hookDisplayFooter($params)
     {
         return $this->renderChatWidget();
     }
 
+    public function hookDisplayBeforeBodyClosingTag($params)
+    {
+        return $this->renderChatWidget();
+    }
+
+    private static $widgetRendered = false;
+
     private function renderChatWidget()
     {
-        $idLang = $this->context->language->id;
+        if (self::$widgetRendered) {
+            return '';
+        }
+        self::$widgetRendered = true;
+
         $customer = $this->context->customer;
 
         $this->context->smarty->assign([
