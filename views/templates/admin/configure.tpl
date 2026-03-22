@@ -253,7 +253,7 @@ function aiochatDiag(test) {
         box.textContent = '❌ Error al comunicar con el servidor.\n\nRespuesta: ' + xhr.responseText.substr(0, 200);
     });
 }
-{/literal}
+
 var AIOCHAT_AGENT = {
     liveUrl: AIOCHAT_AGENT_LIVE_URL + '../aiochat/index.php?fc=module&module=aiochat&controller=livechat',
     token: null,
