@@ -171,7 +171,13 @@
             <button type="button" onclick="aiochatDiag('docs')" class="btn btn-info">
                 <i class="icon-file-text"></i> Probar Documentos
             </button>
+            <button type="button" onclick="aiochatDiag('context')" class="btn btn-warning">
+                <i class="icon-eye"></i> Ver qué lee la IA
+            </button>
         </div>
+        <p style="color:#92400e;font-size:12px;margin-top:8px;">
+            ⚠️ <strong>Ver qué lee la IA</strong> muestra exactamente el contenido de cada sección del contexto: catálogo, envíos, páginas CMS e información manual. Si una sección aparece vacía o con pocos caracteres, la IA no tiene esos datos.
+        </p>
         <div id="aiochat-diag-result" style="display:none;margin-top:14px;padding:14px 16px;border-radius:8px;font-size:13px;font-family:monospace;white-space:pre-wrap;line-height:1.7;border:1px solid #e2e8f0;background:#f8fafc;"></div>
     </div>
 

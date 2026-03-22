@@ -45,13 +45,54 @@ Cuando el cliente pregunta por un producto concreto y lo encuentras en el catál
 INFORMACIÓN DE LA TIENDA:
 ";
 
-        $prompt .= $this->getCustomContext();
-        $prompt .= $this->getProductsContext($userMessage);
-        $prompt .= $this->getShippingContext();
-        $prompt .= $this->getCmsContext();
-        $prompt .= $this->getDocumentsContext();
+        $sections = [
+            fn() => $this->getCustomContext(),
+            fn() => $this->getProductsContext($userMessage),
+            fn() => $this->getShippingContext(),
+            fn() => $this->getCmsContext(),
+            fn() => $this->getDocumentsContext(),
+        ];
+
+        foreach ($sections as $fn) {
+            try {
+                $prompt .= $fn();
+            } catch (Exception $e) {
+                PrestaShopLogger::addLog('[AIOCHAT] Error en sección de contexto: ' . $e->getMessage(), 3, null, 'AioChat');
+            }
+        }
 
         return $prompt;
+    }
+
+    /**
+     * Devuelve un resumen de cada sección para el panel de diagnóstico.
+     */
+    public function diagnoseContext($testMessage = 'prueba')
+    {
+        $sections = [
+            'custom'   => fn() => $this->getCustomContext(),
+            'products' => fn() => $this->getProductsContext($testMessage),
+            'shipping' => fn() => $this->getShippingContext(),
+            'cms'      => fn() => $this->getCmsContext(),
+            'docs'     => fn() => $this->getDocumentsContext(),
+        ];
+
+        $report = [];
+        foreach ($sections as $key => $fn) {
+            try {
+                $content = $fn();
+                $lines   = array_filter(explode("\n", trim($content)));
+                $report[$key] = [
+                    'ok'    => true,
+                    'chars' => strlen($content),
+                    'lines' => count($lines),
+                    'preview' => mb_substr(trim($content), 0, 400),
+                ];
+            } catch (Exception $e) {
+                $report[$key] = ['ok' => false, 'error' => $e->getMessage()];
+            }
+        }
+        return $report;
     }
 
     private function getProductsContext($userMessage)
@@ -176,14 +217,14 @@ INFORMACIÓN DE LA TIENDA:
             $carrierId = (int)$c['id_carrier'];
             $carrierName = $c['name'] ?: "Transportista #{$carrierId}";
 
-            // 2. Precios por zona (delivery + zone), compatible con price y weight ranges
+            // 2. Precios por zona; MIN/MAX evita ONLY_FULL_GROUP_BY con columnas no agrupadas
             $deliveries = Db::getInstance()->executeS(
-                'SELECT d.price, z.name as zone_name
+                'SELECT MIN(d.price) as price, MAX(z.name) as zone_name
                  FROM `' . _DB_PREFIX_ . 'delivery` d
                  LEFT JOIN `' . _DB_PREFIX_ . 'zone` z ON d.id_zone = z.id_zone
                  WHERE d.id_carrier = ' . $carrierId . '
                  GROUP BY d.id_zone
-                 ORDER BY d.price ASC
+                 ORDER BY MIN(d.price) ASC
                  LIMIT 10'
             );
 

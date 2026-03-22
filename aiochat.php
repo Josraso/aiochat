@@ -102,10 +102,11 @@ class AioChat extends Module
     {
         $test   = Tools::getValue('aiochat_test');
         switch ($test) {
-            case 'api':  $result = $this->diagTestApi();  break;
-            case 'db':   $result = $this->diagTestDb();   break;
-            case 'docs': $result = $this->diagTestDocs(); break;
-            default:     $result = ['ok' => false, 'message' => 'Test desconocido'];
+            case 'api':     $result = $this->diagTestApi();     break;
+            case 'db':      $result = $this->diagTestDb();      break;
+            case 'docs':    $result = $this->diagTestDocs();    break;
+            case 'context': $result = $this->diagTestContext(); break;
+            default:        $result = ['ok' => false, 'message' => 'Test desconocido'];
         }
         while (ob_get_level() > 0) {
             ob_end_clean();
@@ -218,6 +219,46 @@ class AioChat extends Module
             $lines[] = "📄 {$doc['original_name']}\n   Tamaño: {$chars} caracteres | Subido: {$doc['date_add']}\n   Vista previa: {$preview}...";
         }
         return ['ok' => true, 'message' => implode("\n\n", $lines)];
+    }
+
+    private function diagTestContext()
+    {
+        require_once _PS_MODULE_DIR_ . 'aiochat/classes/AioChatContext.php';
+        try {
+            $ctx    = new AioChatContext();
+            $report = $ctx->diagnoseContext('sandalias talla 33');
+        } catch (Exception $e) {
+            return ['ok' => false, 'message' => '❌ Error al construir el contexto: ' . $e->getMessage()];
+        }
+
+        $labels = [
+            'custom'   => '📝 Información manual (campo personalizado)',
+            'products' => '📦 Catálogo de productos',
+            'shipping' => '🚚 Tarifas de envío',
+            'cms'      => '📄 Páginas CMS',
+            'docs'     => '🗂 Documentos subidos',
+        ];
+
+        $lines  = ["DIAGNÓSTICO — QUÉ VE LA IA EN CADA SECCIÓN\n(mensaje de prueba: \"sandalias talla 33\")\n"];
+        $allOk  = true;
+
+        foreach ($report as $key => $info) {
+            $label = $labels[$key] ?? $key;
+            if (!$info['ok']) {
+                $lines[] = "❌ {$label}\n   Error: {$info['error']}";
+                $allOk   = false;
+                continue;
+            }
+            if ($info['chars'] <= 30) {
+                $icon  = '⚠️';
+                $allOk = false;
+            } else {
+                $icon = '✅';
+            }
+            $lines[] = "{$icon} {$label}\n   {$info['chars']} caracteres | {$info['lines']} líneas\n   ---\n   {$info['preview']}";
+        }
+
+        return ['ok' => $allOk, 'message' => implode("\n\n", $lines)];
     }
 
     /* ------------------------------------------------------------------ */
