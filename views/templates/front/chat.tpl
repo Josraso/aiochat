@@ -106,7 +106,7 @@ var AIOCHAT = {
     isTyping: false,
     opened: false
 };
-
+{literal}
 // Generar session ID único
 AIOCHAT.sessionId = localStorage.getItem('aiochat_session');
 if (!AIOCHAT.sessionId) {
@@ -324,4 +324,5 @@ function aiochatStartLivePolling() {
         });
     }, 3000);
 }
+{/literal}
 </script>
