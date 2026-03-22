@@ -173,7 +173,7 @@ function aiochatSend() {
         AIOCHAT.isTyping = false;
 
         if (data.error) {
-            aiochatAddMessage('Lo siento, ha ocurrido un error. Por favor inténtalo de nuevo.', 'bot');
+            aiochatAddMessage('[ERROR] ' + data.error, 'bot');
             return;
         }
 

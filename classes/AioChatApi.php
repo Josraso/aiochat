@@ -40,18 +40,21 @@ class AioChatApi
             CURLOPT_TIMEOUT        => 30,
         ]);
 
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $response  = curl_exec($ch);
+        $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
 
         if (!$response) {
-            return ['error' => 'Error de conexión con la API.'];
+            return ['error' => 'cURL falló: ' . ($curlError ?: 'sin respuesta del servidor')];
         }
 
         $data = json_decode($response, true);
 
         if ($httpCode !== 200) {
-            $errorMsg = isset($data['error']['message']) ? $data['error']['message'] : 'Error desconocido';
+            $errorMsg = isset($data['error']['message'])
+                ? $data['error']['message']
+                : 'HTTP ' . $httpCode . ' - ' . substr($response, 0, 200);
             return ['error' => $errorMsg];
         }
 
