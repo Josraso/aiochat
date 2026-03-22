@@ -222,6 +222,24 @@ class AioChat extends Module
             'aiochat_customer_email' => $customer->isLogged() ? $customer->email : '',
         ]);
 
-        return $this->display(__FILE__, 'views/templates/front/chat.tpl');
+        $html = $this->display(__FILE__, 'views/templates/front/chat.tpl');
+
+        // Fallback: si Smarty no renderiza nada, inyectar botón mínimo directamente
+        if (empty(trim($html))) {
+            $chatUrl = $this->context->link->getModuleLink($this->name, 'chat');
+            $html = '<div id="aiochat-widget" style="position:fixed!important;bottom:30px!important;right:30px!important;z-index:2147483647!important;">'
+                  . '<div id="aiochat-bubble" onclick="aiochatToggle()" style="width:70px;height:70px;background:#e63946;border-radius:50%;display:flex!important;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.5);border:3px solid #fff;">'
+                  . '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>'
+                  . '</div>'
+                  . '<div id="aiochat-box" style="display:none;"></div>'
+                  . '<script>var AIOCHAT={chatUrl:"' . addslashes($chatUrl) . '",sessionId:null,history:[],isLive:false,opened:false};'
+                  . 'AIOCHAT.sessionId=localStorage.getItem("aiochat_session")||("ac_"+Math.random().toString(36).substr(2,9)+"_"+Date.now());'
+                  . 'localStorage.setItem("aiochat_session",AIOCHAT.sessionId);'
+                  . 'function aiochatToggle(){var b=document.getElementById("aiochat-box");var btn=document.getElementById("aiochat-bubble");if(!b.style.display||b.style.display==="none"){b.style.display="flex";btn.style.display="none";}else{b.style.display="none";btn.style.display="flex";}}'
+                  . '</script>'
+                  . '</div>';
+        }
+
+        return $html;
     }
 }

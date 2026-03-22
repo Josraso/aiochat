@@ -1,9 +1,9 @@
 {* AioChat - Ventana de chat para el cliente *}
 
-<div id="aiochat-widget">
+<div id="aiochat-widget" style="position:fixed !important;bottom:30px !important;right:30px !important;z-index:2147483647 !important;font-family:sans-serif;">
     <!-- Botón flotante -->
-    <div id="aiochat-bubble" onclick="aiochatToggle()">
-        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="white">
+    <div id="aiochat-bubble" onclick="aiochatToggle()" style="width:70px;height:70px;background:#e63946;border-radius:50%;display:flex !important;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,0.5);border:3px solid #fff;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="white">
             <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
         </svg>
         <span id="aiochat-unread" style="display:none;">1</span>
