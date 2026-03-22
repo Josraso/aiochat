@@ -134,6 +134,28 @@
     </table>
     {/if}
 
+    {* ===== DIAGNÓSTICO ===== *}
+    <div class="panel-heading" style="margin-top:20px;">
+        <i class="icon-check-circle"></i> Diagnóstico del sistema
+    </div>
+    <div style="padding:16px 16px 4px;">
+        <p style="color:#64748b;font-size:13px;margin-bottom:12px;">
+            Comprueba que la API de Anthropic, la base de datos y los documentos funcionan correctamente.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button type="button" onclick="aiochatDiag('api')" class="btn btn-info">
+                <i class="icon-cloud"></i> Probar API Anthropic
+            </button>
+            <button type="button" onclick="aiochatDiag('db')" class="btn btn-info">
+                <i class="icon-database"></i> Probar Base de datos
+            </button>
+            <button type="button" onclick="aiochatDiag('docs')" class="btn btn-info">
+                <i class="icon-file-text"></i> Probar Documentos
+            </button>
+        </div>
+        <div id="aiochat-diag-result" style="display:none;margin-top:14px;padding:14px 16px;border-radius:8px;font-size:13px;font-family:monospace;white-space:pre-wrap;line-height:1.7;border:1px solid #e2e8f0;background:#f8fafc;"></div>
+    </div>
+
     {* Panel de chat en vivo para el agente *}
     <div class="panel-heading" style="margin-top:20px;">
         <i class="icon-comments-alt"></i> Chat en vivo — Conversaciones
@@ -198,9 +220,40 @@
 </div>
 
 <script>
+var AIOCHAT_DIAG_URL      = '{$aiochat_config_url|escape:'javascript':'UTF-8'}';
 var AIOCHAT_AGENT_LIVE_URL = '{$aiochat_module_url|escape:'javascript':'UTF-8'}';
 var AIOCHAT_AGENT_API_KEY  = '{$aiochat_api_key|escape:'javascript':'UTF-8'}';
 {literal}
+function aiochatDiag(test) {
+    var box = document.getElementById('aiochat-diag-result');
+    box.style.display = 'block';
+    box.style.background = '#f8fafc';
+    box.style.borderColor = '#e2e8f0';
+    box.style.color = '#1e293b';
+    box.textContent = '⏳ Probando... (puede tardar hasta 20 segundos)';
+
+    $.post(AIOCHAT_DIAG_URL, {
+        aiochat_diagnostic: 1,
+        aiochat_test: test
+    }, function(data) {
+        if (data.ok) {
+            box.style.background = '#f0fdf4';
+            box.style.borderColor = '#86efac';
+            box.style.color = '#166534';
+        } else {
+            box.style.background = '#fef2f2';
+            box.style.borderColor = '#fca5a5';
+            box.style.color = '#991b1b';
+        }
+        box.textContent = data.message;
+    }, 'json').fail(function(xhr) {
+        box.style.background = '#fef2f2';
+        box.style.borderColor = '#fca5a5';
+        box.style.color = '#991b1b';
+        box.textContent = '❌ Error al comunicar con el servidor.\n\nRespuesta: ' + xhr.responseText.substr(0, 200);
+    });
+}
+{/literal}
 var AIOCHAT_AGENT = {
     liveUrl: AIOCHAT_AGENT_LIVE_URL + '../aiochat/index.php?fc=module&module=aiochat&controller=livechat',
     token: null,

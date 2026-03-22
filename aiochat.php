@@ -94,8 +94,143 @@ class AioChat extends Module
         return true;
     }
 
+    /* ------------------------------------------------------------------ */
+    /* DIAGNÓSTICO                                                          */
+    /* ------------------------------------------------------------------ */
+
+    private function handleDiagnosticAjax()
+    {
+        $test   = Tools::getValue('aiochat_test');
+        switch ($test) {
+            case 'api':  $result = $this->diagTestApi();  break;
+            case 'db':   $result = $this->diagTestDb();   break;
+            case 'docs': $result = $this->diagTestDocs(); break;
+            default:     $result = ['ok' => false, 'message' => 'Test desconocido'];
+        }
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        header('Content-Type: application/json; charset=utf-8');
+        die(json_encode($result));
+    }
+
+    private function diagTestApi()
+    {
+        $apiKey = Configuration::get('AIOCHAT_API_KEY');
+        if (!$apiKey) {
+            return ['ok' => false, 'message' => "❌ API Key NO configurada.\n\nIntroduce tu API Key de Anthropic en la sección de arriba y guarda.\nConsíguela en: console.anthropic.com"];
+        }
+        if (!function_exists('curl_init')) {
+            return ['ok' => false, 'message' => "❌ cURL no disponible en el servidor.\n\nHabla con tu hosting para que activen la extensión PHP cURL."];
+        }
+
+        $payload = json_encode([
+            'model'      => 'claude-haiku-4-5-20251001',
+            'max_tokens' => 20,
+            'messages'   => [['role' => 'user', 'content' => 'Di solo la palabra: OK']],
+        ]);
+        $ch = curl_init('https://api.anthropic.com/v1/messages');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_HTTPHEADER     => [
+                'Content-Type: application/json',
+                'x-api-key: ' . $apiKey,
+                'anthropic-version: 2023-06-01',
+            ],
+        ]);
+        $response  = curl_exec($ch);
+        $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($curlError) {
+            return ['ok' => false, 'message' => "❌ Error de red: {$curlError}\n\nEl servidor no puede alcanzar api.anthropic.com.\nCausas habituales: firewall del hosting, SSL bloqueado, sin salida a internet."];
+        }
+        $data = json_decode($response, true);
+        if ($httpCode === 200) {
+            $text      = isset($data['content'][0]['text']) ? trim($data['content'][0]['text']) : '(vacío)';
+            $keyMasked = substr($apiKey, 0, 12) . '...' . substr($apiKey, -4);
+            return ['ok' => true, 'message' => "✅ Conexión con Anthropic OK.\n\nAPI Key: {$keyMasked}\nModelo:  claude-haiku-4-5-20251001\nRespuesta de prueba: \"{$text}\""];
+        } elseif ($httpCode === 401) {
+            return ['ok' => false, 'message' => "❌ API Key inválida o revocada (HTTP 401).\n\nComprueba que la key es correcta en console.anthropic.com\ny que no la has regenerado o borrado."];
+        } else {
+            $msg = isset($data['error']['message']) ? $data['error']['message'] : substr($response, 0, 300);
+            return ['ok' => false, 'message' => "❌ Error HTTP {$httpCode}:\n{$msg}"];
+        }
+    }
+
+    private function diagTestDb()
+    {
+        $lines = [];
+        $allOk = true;
+        try {
+            $db      = Db::getInstance();
+            $version = $db->getValue('SELECT VERSION()');
+            $lines[] = "✅ Conexión a la base de datos OK (MySQL {$version})";
+        } catch (Exception $e) {
+            return ['ok' => false, 'message' => "❌ Error de conexión a la BD:\n" . $e->getMessage()];
+        }
+
+        $tables = ['aiochat_conversations', 'aiochat_messages', 'aiochat_documents'];
+        foreach ($tables as $t) {
+            $exists = $db->executeS('SHOW TABLES LIKE "' . _DB_PREFIX_ . $t . '"');
+            if ($exists) {
+                $count   = (int)$db->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . $t . '`');
+                $lines[] = "✅ Tabla {$t}: {$count} registros";
+            } else {
+                $lines[] = "❌ Tabla {$t}: NO EXISTE — reinstala el módulo";
+                $allOk   = false;
+            }
+        }
+
+        $products = (int)$db->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'product` WHERE active = 1');
+        $lines[]  = "\n📦 Productos activos en la tienda: {$products}";
+
+        $convs = (int)$db->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'aiochat_conversations`');
+        if ($convs > 0) {
+            $lines[] = "💬 Conversaciones registradas: {$convs}";
+        }
+
+        return ['ok' => $allOk, 'message' => implode("\n", $lines)];
+    }
+
+    private function diagTestDocs()
+    {
+        try {
+            $docs = Db::getInstance()->executeS(
+                'SELECT * FROM `' . _DB_PREFIX_ . 'aiochat_documents` ORDER BY date_add DESC'
+            );
+        } catch (Exception $e) {
+            return ['ok' => false, 'message' => "❌ Error al leer tabla de documentos:\n" . $e->getMessage()];
+        }
+
+        if (empty($docs)) {
+            return ['ok' => true, 'message' => "ℹ️ No hay documentos subidos todavía.\n\nUsa la sección 'Documentos de contexto' para subir PDFs o TXT.\nEl bot los usará para responder preguntas sobre tu tienda."];
+        }
+
+        $lines = ['✅ Documentos cargados en el bot: ' . count($docs) . "\n"];
+        foreach ($docs as $doc) {
+            $chars   = mb_strlen($doc['content']);
+            $preview = mb_substr(strip_tags($doc['content']), 0, 120);
+            $lines[] = "📄 {$doc['original_name']}\n   Tamaño: {$chars} caracteres | Subido: {$doc['date_add']}\n   Vista previa: {$preview}...";
+        }
+        return ['ok' => true, 'message' => implode("\n\n", $lines)];
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* CONFIGURACIÓN                                                        */
+    /* ------------------------------------------------------------------ */
+
     public function getContent()
     {
+        // AJAX: diagnóstico del sistema
+        if (Tools::isSubmit('aiochat_diagnostic')) {
+            $this->handleDiagnosticAjax();
+        }
+
         $output = '';
 
         if (Tools::isSubmit('submit_aiochat')) {
