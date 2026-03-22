@@ -80,6 +80,14 @@
             </div>
         </div>
 
+        <div class="form-group">
+            <label class="control-label col-lg-3">Información adicional para el chatbot</label>
+            <div class="col-lg-9">
+                <textarea name="AIOCHAT_CUSTOM_CONTEXT" class="form-control" rows="6" placeholder="Escribe aquí información adicional que quieras que el chatbot conozca: horarios, políticas de devolución, marcas que vendéis, preguntas frecuentes, etc.">{$aiochat_custom_context|escape:'html':'UTF-8'}</textarea>
+                <p class="help-block">Texto libre que se añade al contexto del chatbot. Puedes indicar horarios, marcas, condiciones especiales, FAQs o cualquier información que no esté en los productos ni páginas CMS.</p>
+            </div>
+        </div>
+
         <div class="panel-footer">
             <button type="submit" name="submit_aiochat" class="btn btn-primary">
                 <i class="process-icon-save"></i> Guardar configuración

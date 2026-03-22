@@ -114,6 +114,45 @@ if (!AIOCHAT.sessionId) {
     localStorage.setItem('aiochat_session', AIOCHAT.sessionId);
 }
 
+// Restaurar historial y mensajes desde localStorage
+(function() {
+    var savedHistory = localStorage.getItem('aiochat_history_' + AIOCHAT.sessionId);
+    var savedMsgs    = localStorage.getItem('aiochat_msgs_' + AIOCHAT.sessionId);
+    if (savedHistory) {
+        try { AIOCHAT.history = JSON.parse(savedHistory); } catch(e) {}
+    }
+    if (savedMsgs) {
+        try {
+            var msgs = JSON.parse(savedMsgs);
+            msgs.forEach(function(m) { aiochatAddMessage(m.t, m.s); });
+        } catch(e) {}
+    }
+})();
+
+function aiochatPersist() {
+    localStorage.setItem('aiochat_history_' + AIOCHAT.sessionId, JSON.stringify(AIOCHAT.history));
+    var nodes = document.getElementById('aiochat-messages').querySelectorAll('.aiochat-msg');
+    var msgs = [];
+    nodes.forEach(function(n) {
+        var bubble = n.querySelector('.aiochat-bubble');
+        if (!bubble) return;
+        var sender = n.classList.contains('aiochat-customer') ? 'customer' : 'bot';
+        msgs.push({t: bubble.innerHTML.replace(/<br>/g, '\n'), s: sender});
+    });
+    localStorage.setItem('aiochat_msgs_' + AIOCHAT.sessionId, JSON.stringify(msgs.slice(-30)));
+}
+
+function aiochatClearSession() {
+    localStorage.removeItem('aiochat_session');
+    localStorage.removeItem('aiochat_history_' + AIOCHAT.sessionId);
+    localStorage.removeItem('aiochat_msgs_' + AIOCHAT.sessionId);
+    AIOCHAT.history = [];
+    AIOCHAT.sessionId = 'ac_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+    localStorage.setItem('aiochat_session', AIOCHAT.sessionId);
+    var msgs = document.getElementById('aiochat-messages');
+    msgs.innerHTML = '';
+}
+
 function aiochatToggle() {
     var box = document.getElementById('aiochat-box');
     var bubble = document.getElementById('aiochat-bubble');
@@ -146,6 +185,7 @@ function aiochatSend() {
 
     aiochatAddMessage(message, 'customer');
     AIOCHAT.history.push({role: 'user', content: message});
+    aiochatPersist();
 
     if (AIOCHAT.isLive) {
         aiochatSendLiveMessage(message);
@@ -179,6 +219,7 @@ function aiochatSend() {
 
         aiochatAddMessage(data.response, 'bot');
         AIOCHAT.history.push({role: 'bot', content: data.response});
+        aiochatPersist();
 
         if (data.human_requested) {
             setTimeout(aiochatShowHuman, 800);
@@ -320,6 +361,11 @@ function aiochatStartLivePolling() {
             if (data.status === 'closed') {
                 clearInterval(AIOCHAT.livePolling);
                 AIOCHAT.isLive = false;
+                document.getElementById('aiochat-live-panel').style.display = 'none';
+                document.getElementById('aiochat-messages').style.display = 'flex';
+                document.getElementById('aiochat-input-area').style.display = 'flex';
+                aiochatAddMessage('El agente ha cerrado la conversación. Si necesitas más ayuda pulsa en el chat.', 'bot');
+                aiochatClearSession();
             }
         });
     }, 3000);

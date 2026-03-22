@@ -242,6 +242,7 @@ class AioChat extends Module
             Configuration::updateValue('AIOCHAT_BOT_NAME', Tools::getValue('AIOCHAT_BOT_NAME'));
             Configuration::updateValue('AIOCHAT_WELCOME_MSG', Tools::getValue('AIOCHAT_WELCOME_MSG'));
             Configuration::updateValue('AIOCHAT_AGENT_ONLINE', Tools::getValue('AIOCHAT_AGENT_ONLINE'));
+            Configuration::updateValue('AIOCHAT_CUSTOM_CONTEXT', Tools::getValue('AIOCHAT_CUSTOM_CONTEXT'));
             $pos = Tools::getValue('AIOCHAT_POSITION');
             Configuration::updateValue('AIOCHAT_POSITION', in_array($pos, ['left', 'right']) ? $pos : 'right');
             $output .= $this->displayConfirmation($this->l('Configuración guardada correctamente.'));
@@ -267,8 +268,9 @@ class AioChat extends Module
             'aiochat_youtube'      => Configuration::get('AIOCHAT_YOUTUBE'),
             'aiochat_bot_name'     => Configuration::get('AIOCHAT_BOT_NAME'),
             'aiochat_welcome_msg'  => Configuration::get('AIOCHAT_WELCOME_MSG'),
-            'aiochat_agent_online' => Configuration::get('AIOCHAT_AGENT_ONLINE'),
-            'aiochat_position'     => Configuration::get('AIOCHAT_POSITION') ?: 'right',
+            'aiochat_agent_online'    => Configuration::get('AIOCHAT_AGENT_ONLINE'),
+            'aiochat_custom_context'  => Configuration::get('AIOCHAT_CUSTOM_CONTEXT'),
+            'aiochat_position'        => Configuration::get('AIOCHAT_POSITION') ?: 'right',
             'aiochat_documents'    => Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'aiochat_documents` ORDER BY date_add DESC'),
             'aiochat_module_url'   => $this->getPathUri(),
             'aiochat_config_url'   => AdminController::$currentIndex . '&configure=' . $this->name . '&token=' . Tools::getAdminTokenLite('AdminModules'),

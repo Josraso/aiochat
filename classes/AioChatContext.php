@@ -19,21 +19,26 @@ class AioChatContext
         $shopName = Configuration::get('PS_SHOP_NAME');
         $botName  = Configuration::get('AIOCHAT_BOT_NAME') ?: 'Asistente';
 
-        $prompt = "Eres {$botName}, el asistente virtual de la tienda online \"{$shopName}\". 
+        $prompt = "Eres {$botName}, el asistente virtual de la tienda online \"{$shopName}\".
 Tu objetivo es ayudar a los clientes con información sobre productos, precios, envíos y cualquier duda sobre la tienda.
 
 REGLAS IMPORTANTES:
 - Responde siempre en el mismo idioma que el cliente (español o inglés).
 - NUNCA recomiendes productos de otras tiendas o competidores.
-- Si no tienes información suficiente para responder, dilo con naturalidad y ofrece contactar con una persona.
-- Usa tu conocimiento general sobre productos cuando la descripción de la tienda sea escasa.
-- Sé amable, conciso y útil.
+- Sé amable, conciso y directo. Una o dos frases suelen ser suficientes.
+- Mantén la conversación natural y fluida. NO añadas datos de contacto, teléfono ni email al final de cada respuesta.
+- Solo menciona datos de contacto cuando el cliente los pida explícitamente o cuando no puedas resolver su duda de ninguna otra manera.
+- Si el cliente ya dijo que no necesita más ayuda, responde brevemente (\"¡De nada! ¡Hasta pronto!\" etc.).
+- Usa tu conocimiento general sobre productos cuando la descripción sea escasa.
 - Si el cliente quiere hablar con una persona en cualquier momento, responde exactamente con: [HUMAN_REQUESTED]
 - Si detectas que el cliente está frustrado o insatisfecho, ofrece hablar con una persona.
+- Todos los productos del listado están activos y disponibles para comprar en la tienda; no digas que un producto no está disponible solo porque figure sin stock — el cliente puede comprarlo igualmente.
+- Cuando menciones un producto concreto, incluye siempre su enlace (URL) si está disponible.
 
 INFORMACIÓN DE LA TIENDA:
 ";
 
+        $prompt .= $this->getCustomContext();
         $prompt .= $this->getProductsContext($userMessage);
         $prompt .= $this->getShippingContext();
         $prompt .= $this->getCmsContext();
@@ -51,8 +56,8 @@ INFORMACIÓN DE LA TIENDA:
         $products = [];
 
         if (!empty($words)) {
-            $searchSql = 'SELECT p.id_product, pl.name, pl.description_short, pl.description, 
-                            p.price, p.quantity, cl.name as category
+            $searchSql = 'SELECT p.id_product, pl.name, pl.link_rewrite, pl.description_short, pl.description,
+                            p.price, cl.name as category
                           FROM `' . _DB_PREFIX_ . 'product` p
                           LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
                           LEFT JOIN `' . _DB_PREFIX_ . 'category_product` cp ON p.id_product = cp.id_product
@@ -68,10 +73,10 @@ INFORMACIÓN DE LA TIENDA:
             $products = Db::getInstance()->executeS($searchSql);
         }
 
-        // Si no hay resultados por búsqueda, coger los más vendidos
+        // Si no hay resultados por búsqueda, coger los últimos productos
         if (empty($products)) {
             $products = Db::getInstance()->executeS(
-                'SELECT p.id_product, pl.name, pl.description_short, p.price, p.quantity, cl.name as category
+                'SELECT p.id_product, pl.name, pl.link_rewrite, pl.description_short, p.price, cl.name as category
                  FROM `' . _DB_PREFIX_ . 'product` p
                  LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
                  LEFT JOIN `' . _DB_PREFIX_ . 'category_product` cp ON p.id_product = cp.id_product
@@ -87,19 +92,29 @@ INFORMACIÓN DE LA TIENDA:
             return $context . "No hay productos disponibles.\n";
         }
 
+        $link = Context::getContext()->link;
+
         foreach ($products as $p) {
             try {
                 $price = Tools::displayPrice($p['price']);
             } catch (Exception $e) {
                 $price = number_format((float)$p['price'], 2) . ' €';
             }
-            $stock = (int)$p['quantity'] > 0 ? 'En stock' : 'Sin stock';
             $desc     = strip_tags($p['description_short']);
-            $desc     = $desc ?: strip_tags($p['description']);
+            $desc     = $desc ?: strip_tags(isset($p['description']) ? $p['description'] : '');
             $desc     = mb_substr($desc, 0, 200);
             $category = $p['category'] ?: '';
 
-            $context .= "- {$p['name']} | Precio: {$price} | {$stock} | Categoría: {$category}";
+            try {
+                $url = $link->getProductLink((int)$p['id_product'], $p['link_rewrite']);
+            } catch (Exception $e) {
+                $url = '';
+            }
+
+            $context .= "- {$p['name']} | Precio: {$price} | Categoría: {$category}";
+            if ($url) {
+                $context .= " | URL: {$url}";
+            }
             if ($desc) {
                 $context .= " | {$desc}";
             }
@@ -107,6 +122,15 @@ INFORMACIÓN DE LA TIENDA:
         }
 
         return $context;
+    }
+
+    private function getCustomContext()
+    {
+        $custom = trim(Configuration::get('AIOCHAT_CUSTOM_CONTEXT'));
+        if (!$custom) {
+            return '';
+        }
+        return "\n--- INFORMACIÓN PERSONALIZADA DE LA TIENDA ---\n" . $custom . "\n";
     }
 
     private function getShippingContext()
