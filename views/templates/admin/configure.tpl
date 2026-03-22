@@ -59,6 +59,17 @@
         </div>
 
         <div class="form-group">
+            <label class="control-label col-lg-3">Posición del botón</label>
+            <div class="col-lg-9">
+                <select name="AIOCHAT_POSITION" class="form-control" style="width:auto;">
+                    <option value="right" {if $aiochat_position == 'right' || !$aiochat_position}selected{/if}>Derecha (por defecto)</option>
+                    <option value="left" {if $aiochat_position == 'left'}selected{/if}>Izquierda</option>
+                </select>
+                <p class="help-block">Elige en qué esquina inferior aparece el botón del chat.</p>
+            </div>
+        </div>
+
+        <div class="form-group">
             <label class="control-label col-lg-3">Agente disponible (chat en vivo)</label>
             <div class="col-lg-9">
                 <select name="AIOCHAT_AGENT_ONLINE" class="form-control" style="width:auto;">

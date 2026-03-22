@@ -9,9 +9,12 @@ require_once _PS_MODULE_DIR_ . 'aiochat/classes/AioChatLive.php';
 
 class AioChatChatModuleFrontController extends ModuleFrontController
 {
+    public $ajax = true;
+    public $ssl = true;
+
     public function initContent()
     {
-        header('Content-Type: application/json');
+        header('Content-Type: application/json; charset=utf-8');
 
         $action = Tools::getValue('action');
 
@@ -36,7 +39,11 @@ class AioChatChatModuleFrontController extends ModuleFrontController
     {
         $message    = trim(Tools::getValue('message'));
         $sessionId  = Tools::getValue('session_id');
-        $history    = Tools::getValue('history');
+        $historyRaw = Tools::getValue('history');
+        $history    = json_decode($historyRaw, true);
+        if (!is_array($history)) {
+            $history = [];
+        }
         $customerName  = Tools::getValue('customer_name', '');
         $customerEmail = Tools::getValue('customer_email', '');
 
@@ -46,19 +53,22 @@ class AioChatChatModuleFrontController extends ModuleFrontController
         }
 
         // Guardar conversación y mensaje del cliente
-        $conv = AioChatLive::getOrCreateConversation($sessionId, $customerName, $customerEmail);
-        AioChatLive::saveMessage($conv['id_conversation'], 'customer', $message);
+        try {
+            $conv = AioChatLive::getOrCreateConversation($sessionId, $customerName, $customerEmail);
+            AioChatLive::saveMessage($conv['id_conversation'], 'customer', $message);
+            $convId = $conv['id_conversation'];
+        } catch (Exception $e) {
+            $convId = 0;
+        }
 
         // Construir historial de mensajes para la API
         $messages = [];
-        if (is_array($history)) {
-            foreach ($history as $h) {
-                if (isset($h['role']) && isset($h['content'])) {
-                    $messages[] = [
-                        'role'    => $h['role'] === 'bot' ? 'assistant' : 'user',
-                        'content' => (string)$h['content'],
-                    ];
-                }
+        foreach ($history as $h) {
+            if (isset($h['role']) && isset($h['content'])) {
+                $messages[] = [
+                    'role'    => $h['role'] === 'bot' ? 'assistant' : 'user',
+                    'content' => (string)$h['content'],
+                ];
             }
         }
         $messages[] = ['role' => 'user', 'content' => $message];
@@ -86,19 +96,23 @@ class AioChatChatModuleFrontController extends ModuleFrontController
             if (!$responseText) {
                 $responseText = 'Entendido, voy a conectarte con una persona. ¿Cómo prefieres que te contactemos?';
             }
-            AioChatLive::setStatus($conv['id_conversation'], 'waiting');
+            if ($convId) {
+                AioChatLive::setStatus($convId, 'waiting');
+            }
         }
 
         // Guardar respuesta del bot
-        AioChatLive::saveMessage($conv['id_conversation'], 'bot', $responseText);
+        if ($convId) {
+            AioChatLive::saveMessage($convId, 'bot', $responseText);
+        }
 
         $this->jsonResponse([
-            'response'       => $responseText,
+            'response'        => $responseText,
             'human_requested' => $humanRequested,
-            'whatsapp'       => Configuration::get('AIOCHAT_WHATSAPP'),
-            'phone'          => Configuration::get('AIOCHAT_PHONE'),
-            'agent_online'   => (bool)Configuration::get('AIOCHAT_AGENT_ONLINE'),
-            'id_conversation' => $conv['id_conversation'],
+            'whatsapp'        => Configuration::get('AIOCHAT_WHATSAPP'),
+            'phone'           => Configuration::get('AIOCHAT_PHONE'),
+            'agent_online'    => (bool)Configuration::get('AIOCHAT_AGENT_ONLINE'),
+            'id_conversation' => $convId,
         ]);
     }
 
@@ -110,9 +124,13 @@ class AioChatChatModuleFrontController extends ModuleFrontController
             return;
         }
 
-        $conv = AioChatLive::getOrCreateConversation($sessionId);
-        AioChatLive::setStatus($conv['id_conversation'], 'waiting');
-        AioChatLive::saveMessage($conv['id_conversation'], 'bot', '[El cliente ha solicitado hablar con una persona]');
+        try {
+            $conv = AioChatLive::getOrCreateConversation($sessionId);
+            AioChatLive::setStatus($conv['id_conversation'], 'waiting');
+            AioChatLive::saveMessage($conv['id_conversation'], 'bot', '[El cliente ha solicitado hablar con una persona]');
+        } catch (Exception $e) {
+            // DB puede no estar disponible
+        }
 
         $this->jsonResponse([
             'ok'           => true,
