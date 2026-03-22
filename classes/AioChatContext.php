@@ -344,7 +344,7 @@ INFORMACIÓN DE LA TIENDA:
 
         $context = "\n--- DOCUMENTACIÓN ADICIONAL ---\n";
         foreach ($docs as $doc) {
-            $content = mb_substr($doc['content'], 0, 2000);
+            $content = mb_substr($doc['content'], 0, 8000);
             $context .= "### {$doc['original_name']}\n{$content}\n\n";
         }
 

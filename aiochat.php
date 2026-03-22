@@ -337,32 +337,28 @@ class AioChat extends Module
         }
 
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-        if (!in_array($ext, ['pdf', 'txt'])) {
-            return $this->displayError($this->l('Solo se permiten archivos PDF o TXT.'));
+        if (!in_array($ext, ['pdf', 'txt', 'docx', 'doc'])) {
+            return $this->displayError($this->l('Solo se permiten archivos PDF, TXT, DOCX o DOC.'));
         }
 
-        $content = '';
-        if ($ext === 'txt') {
-            $content = file_get_contents($file['tmp_name']);
-        } elseif ($ext === 'pdf') {
-            // Extraer texto del PDF con pdftotext si está disponible
-            $tmpPath = _PS_MODULE_DIR_ . $this->name . '/uploads/' . uniqid() . '.pdf';
-            move_uploaded_file($file['tmp_name'], $tmpPath);
-            $content = shell_exec('pdftotext ' . escapeshellarg($tmpPath) . ' -');
-            if (!$content) {
-                $content = '[PDF subido: ' . $file['name'] . ' - sin extracción de texto automática]';
-            }
-            unlink($tmpPath);
+        require_once _PS_MODULE_DIR_ . 'aiochat/classes/AioChatDocParser.php';
+        $content = AioChatDocParser::extract($file['tmp_name'], $ext);
+
+        if (empty(trim($content))) {
+            $content = '[No se pudo extraer texto del archivo: ' . $file['name'] . ']';
         }
 
         Db::getInstance()->insert('aiochat_documents', [
             'filename'      => pSQL(uniqid()),
             'original_name' => pSQL($file['name']),
-            'content'       => pSQL(substr($content, 0, 100000)),
+            'content'       => pSQL(mb_substr($content, 0, 200000)),
             'date_add'      => date('Y-m-d H:i:s'),
         ]);
 
-        return $this->displayConfirmation($this->l('Documento subido correctamente.'));
+        $chars = mb_strlen(trim($content));
+        return $this->displayConfirmation(
+            $this->l('Documento subido correctamente.') . " ({$chars} caracteres extraídos)"
+        );
     }
 
     public function hookDisplayHeader($params)

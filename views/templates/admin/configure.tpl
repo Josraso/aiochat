@@ -114,8 +114,8 @@
         <div class="form-group">
             <label class="control-label col-lg-3">Subir documento</label>
             <div class="col-lg-9">
-                <input type="file" name="aiochat_pdf" accept=".pdf,.txt" class="form-control" />
-                <p class="help-block">Sube catálogos, fichas de producto, manuales o cualquier información extra para el bot.</p>
+                <input type="file" name="aiochat_pdf" accept=".pdf,.txt,.docx,.doc" class="form-control" />
+                <p class="help-block">Sube catálogos, fichas de producto, manuales o cualquier información extra para el bot. Formatos admitidos: PDF, TXT, Word (.docx, .doc).</p>
             </div>
         </div>
         <div class="panel-footer">
