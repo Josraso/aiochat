@@ -4,16 +4,27 @@
     position: fixed !important;
     bottom: 30px !important;
     z-index: 2147483647 !important;
-    right: 30px !important; /* sobreescrito por el <style> inline del tpl */
     display: flex !important;
     flex-direction: column-reverse !important;
-    align-items: flex-end !important;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     pointer-events: none;
 }
 
 #aiochat-widget > * {
     pointer-events: auto;
+}
+
+/* Posición configurable desde el admin */
+#aiochat-widget.aiochat-right {
+    right: 30px !important;
+    left: auto !important;
+    align-items: flex-end !important;
+}
+
+#aiochat-widget.aiochat-left {
+    left: 30px !important;
+    right: auto !important;
+    align-items: flex-start !important;
 }
 
 
@@ -385,6 +396,13 @@
 
     #aiochat-widget {
         bottom: 12px;
-        right: 12px;
+    }
+    #aiochat-widget.aiochat-right {
+        right: 12px !important;
+        left: auto !important;
+    }
+    #aiochat-widget.aiochat-left {
+        left: 12px !important;
+        right: auto !important;
     }
 }

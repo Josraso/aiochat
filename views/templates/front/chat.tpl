@@ -1,19 +1,6 @@
 {* AioChat - Ventana de chat para el cliente *}
-<style>
-#aiochat-widget {
-    {if $aiochat_position == 'left'}
-    left: 30px !important;
-    right: auto !important;
-    align-items: flex-start !important;
-    {else}
-    right: 30px !important;
-    left: auto !important;
-    align-items: flex-end !important;
-    {/if}
-}
-</style>
 
-<div id="aiochat-widget">
+<div id="aiochat-widget" class="aiochat-{$aiochat_position|escape:'html':'UTF-8'}">
     <!-- Botón flotante -->
     <div id="aiochat-bubble" onclick="aiochatToggle()">
         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="white">

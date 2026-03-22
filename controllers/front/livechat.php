@@ -7,16 +7,20 @@ require_once _PS_MODULE_DIR_ . 'aiochat/classes/AioChatLive.php';
 
 class AioChatLivechatModuleFrontController extends ModuleFrontController
 {
+    public $ajax = true;
+    public $ssl  = true;
+
     public function initContent()
     {
-        header('Content-Type: application/json');
+        @ini_set('display_errors', 0);
+        @error_reporting(0);
 
         $action    = Tools::getValue('action');
         $sessionId = Tools::getValue('session_id');
 
         if (!$sessionId) {
-            echo json_encode(['error' => 'Sin sesión']);
-            exit;
+            $this->jsonResponse(['error' => 'Sin sesión']);
+            return;
         }
 
         switch ($action) {
@@ -36,9 +40,19 @@ class AioChatLivechatModuleFrontController extends ModuleFrontController
                 $this->handleAgentClose();
                 break;
             default:
-                echo json_encode(['error' => 'Acción no válida']);
+                $this->jsonResponse(['error' => 'Acción no válida']);
         }
+    }
 
+    private function jsonResponse($data)
+    {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8');
+        }
+        echo json_encode($data);
         exit;
     }
 
@@ -51,7 +65,7 @@ class AioChatLivechatModuleFrontController extends ModuleFrontController
         );
 
         if (!$conv) {
-            echo json_encode(['messages' => [], 'status' => 'bot']);
+            $this->jsonResponse(['messages' => [], 'status' => 'bot']);
             return;
         }
 
@@ -59,7 +73,7 @@ class AioChatLivechatModuleFrontController extends ModuleFrontController
         // Solo enviar mensajes del agente en el polling de live
         $agentMessages = array_filter($messages, function($m) { return $m['sender'] === 'agent'; });
 
-        echo json_encode([
+        $this->jsonResponse([
             'messages' => array_values($agentMessages),
             'status'   => $conv['status'],
         ]);
@@ -74,19 +88,19 @@ class AioChatLivechatModuleFrontController extends ModuleFrontController
         );
 
         if (!$conv || !$message) {
-            echo json_encode(['error' => 'Error al enviar']);
+            $this->jsonResponse(['error' => 'Error al enviar']);
             return;
         }
 
         AioChatLive::saveMessage($conv['id_conversation'], 'customer', $message);
-        echo json_encode(['ok' => true]);
+        $this->jsonResponse(['ok' => true]);
     }
 
     // Agente hace polling para ver conversaciones pendientes y mensajes
     private function handleAgentPoll()
     {
         if (!$this->isAdmin()) {
-            echo json_encode(['error' => 'No autorizado']);
+            $this->jsonResponse(['error' => 'No autorizado']);
             return;
         }
 
@@ -95,10 +109,10 @@ class AioChatLivechatModuleFrontController extends ModuleFrontController
 
         if ($idConv) {
             $messages = AioChatLive::getMessages($idConv, $since);
-            echo json_encode(['messages' => $messages]);
+            $this->jsonResponse(['messages' => $messages]);
         } else {
             $pending = AioChatLive::getPendingConversations();
-            echo json_encode(['conversations' => $pending]);
+            $this->jsonResponse(['conversations' => $pending]);
         }
     }
 
@@ -106,7 +120,7 @@ class AioChatLivechatModuleFrontController extends ModuleFrontController
     private function handleAgentSend()
     {
         if (!$this->isAdmin()) {
-            echo json_encode(['error' => 'No autorizado']);
+            $this->jsonResponse(['error' => 'No autorizado']);
             return;
         }
 
@@ -114,20 +128,20 @@ class AioChatLivechatModuleFrontController extends ModuleFrontController
         $message = trim(Tools::getValue('message'));
 
         if (!$idConv || !$message) {
-            echo json_encode(['error' => 'Datos incompletos']);
+            $this->jsonResponse(['error' => 'Datos incompletos']);
             return;
         }
 
         AioChatLive::saveMessage($idConv, 'agent', $message);
         AioChatLive::setStatus($idConv, 'live');
-        echo json_encode(['ok' => true]);
+        $this->jsonResponse(['ok' => true]);
     }
 
     // Agente cierra la conversación
     private function handleAgentClose()
     {
         if (!$this->isAdmin()) {
-            echo json_encode(['error' => 'No autorizado']);
+            $this->jsonResponse(['error' => 'No autorizado']);
             return;
         }
 
@@ -136,7 +150,7 @@ class AioChatLivechatModuleFrontController extends ModuleFrontController
             AioChatLive::setStatus($idConv, 'closed');
             AioChatLive::saveMessage($idConv, 'agent', 'Conversación cerrada por el agente. ¡Hasta pronto!');
         }
-        echo json_encode(['ok' => true]);
+        $this->jsonResponse(['ok' => true]);
     }
 
     private function isAdmin()

@@ -14,7 +14,9 @@ class AioChatChatModuleFrontController extends ModuleFrontController
 
     public function initContent()
     {
-        header('Content-Type: application/json; charset=utf-8');
+        // Evitar que notices/warnings de PHP corrompan el JSON
+        @ini_set('display_errors', 0);
+        @error_reporting(0);
 
         $action = Tools::getValue('action');
 
@@ -74,8 +76,14 @@ class AioChatChatModuleFrontController extends ModuleFrontController
         $messages[] = ['role' => 'user', 'content' => $message];
 
         // Construir system prompt con contexto de la tienda
-        $contextBuilder = new AioChatContext();
-        $systemPrompt   = $contextBuilder->buildSystemPrompt($message);
+        try {
+            $contextBuilder = new AioChatContext();
+            $systemPrompt   = $contextBuilder->buildSystemPrompt($message);
+        } catch (Exception $e) {
+            $shopName     = Configuration::get('PS_SHOP_NAME');
+            $botName      = Configuration::get('AIOCHAT_BOT_NAME') ?: 'Asistente';
+            $systemPrompt = "Eres {$botName}, el asistente virtual de \"{$shopName}\". Ayuda al cliente con sus preguntas de forma amable y concisa.";
+        }
 
         // Llamar a la API
         $api    = new AioChatApi();
@@ -178,6 +186,13 @@ class AioChatChatModuleFrontController extends ModuleFrontController
 
     private function jsonResponse($data)
     {
+        // Limpiar cualquier output previo (notices, warnings, HTML de PS)
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8');
+        }
         echo json_encode($data);
         exit;
     }

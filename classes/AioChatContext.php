@@ -88,8 +88,12 @@ INFORMACIÓN DE LA TIENDA:
         }
 
         foreach ($products as $p) {
-            $price    = Tools::displayPrice($p['price']);
-            $stock    = (int)$p['quantity'] > 0 ? 'En stock' : 'Sin stock';
+            try {
+                $price = Tools::displayPrice($p['price']);
+            } catch (Exception $e) {
+                $price = number_format((float)$p['price'], 2) . ' €';
+            }
+            $stock = (int)$p['quantity'] > 0 ? 'En stock' : 'Sin stock';
             $desc     = strip_tags($p['description_short']);
             $desc     = $desc ?: strip_tags($p['description']);
             $desc     = mb_substr($desc, 0, 200);
