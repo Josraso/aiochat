@@ -37,7 +37,7 @@ REGLAS DE RESPUESTA:
 - Si el cliente quiere hablar con una persona, responde exactamente con: [HUMAN_REQUESTED]
 - Si el cliente está frustrado o insatisfecho, ofrece hablar con una persona.
 - Todos los productos del listado están activos y disponibles para comprar; no digas que no están disponibles por figura con stock 0.
-- Cuando menciones un producto concreto, incluye su enlace (URL) si está disponible.
+- Cuando menciones un producto concreto, escribe su nombre como enlace Markdown: [Nombre del producto](URL). NUNCA pongas la URL en crudo.
 
 RECOMENDACIONES COMPLEMENTARIAS:
 Cuando el cliente pregunta por un producto concreto y lo encuentras en el catálogo, puedes sugerir 1 o 2 productos complementarios de la sección «OTROS PRODUCTOS DEL CATÁLOGO» solo si tienen sentido real juntos (ej: accesorios para el mismo uso, protección, mantenimiento...). No fuerces recomendaciones si no hay nada que encaje. Nunca inventes productos que no estén en el listado.
@@ -126,7 +126,9 @@ INFORMACIÓN DE LA TIENDA:
     private function formatProduct($p, $link)
     {
         try {
-            $price = Tools::displayPrice($p['price']);
+            // Precio con IVA incluido usando el país por defecto
+            $priceWithTax = Product::getPriceStatic((int)$p['id_product'], true);
+            $price = Tools::displayPrice($priceWithTax);
         } catch (Exception $e) {
             $price = number_format((float)$p['price'], 2) . ' €';
         }

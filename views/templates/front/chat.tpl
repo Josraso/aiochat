@@ -22,6 +22,7 @@
             </div>
             <div id="aiochat-header-actions">
                 <button onclick="aiochatRequestHuman()" title="Hablar con una persona">👤</button>
+                <button onclick="aiochatClearChat()" title="Limpiar conversación">🗑</button>
                 <button onclick="aiochatToggle()" title="Cerrar">✕</button>
             </div>
         </div>
@@ -105,6 +106,7 @@ var AIOCHAT = {
     customerName: '{$aiochat_customer_name|escape:'javascript':'UTF-8'}',
     customerEmail: '{$aiochat_customer_email|escape:'javascript':'UTF-8'}',
     agentOnline: {if $aiochat_agent_online}true{else}false{/if},
+    welcomeMsg: '{$aiochat_welcome_msg|escape:'javascript':'UTF-8'}',
     isTyping: false,
     opened: false
 };
@@ -144,8 +146,7 @@ function aiochatPersist() {
     localStorage.setItem('aiochat_msgs_' + AIOCHAT.sessionId, JSON.stringify(msgs.slice(-30)));
 }
 
-function aiochatClearSession() {
-    localStorage.removeItem('aiochat_session');
+function aiochatClearChat() {
     localStorage.removeItem('aiochat_history_' + AIOCHAT.sessionId);
     localStorage.removeItem('aiochat_msgs_' + AIOCHAT.sessionId);
     AIOCHAT.history = [];
@@ -153,6 +154,14 @@ function aiochatClearSession() {
     localStorage.setItem('aiochat_session', AIOCHAT.sessionId);
     var msgs = document.getElementById('aiochat-messages');
     msgs.innerHTML = '';
+    // Restaurar mensaje de bienvenida
+    var div = document.createElement('div');
+    div.className = 'aiochat-msg aiochat-bot';
+    var bubble = document.createElement('div');
+    bubble.className = 'aiochat-bubble';
+    bubble.textContent = AIOCHAT.welcomeMsg;
+    div.appendChild(bubble);
+    msgs.appendChild(div);
 }
 
 function aiochatToggle() {
@@ -234,13 +243,36 @@ function aiochatSend() {
     });
 }
 
+function aiochatFormatText(text) {
+    // Escapar HTML para evitar XSS
+    var safe = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    // Markdown links: [Nombre del producto](URL) → botón clicable
+    safe = safe.replace(
+        /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer" class="aiochat-product-link">$1</a>'
+    );
+    // URLs sueltas que hayan podido quedar
+    safe = safe.replace(
+        /(?<!['">=])(https?:\/\/\S+)/g,
+        '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+    );
+    // Negrita **texto**
+    safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Saltos de línea
+    safe = safe.replace(/\n/g, '<br>');
+    return safe;
+}
+
 function aiochatAddMessage(text, sender) {
     var msgs = document.getElementById('aiochat-messages');
     var div = document.createElement('div');
     div.className = 'aiochat-msg aiochat-' + sender;
     var bubble = document.createElement('div');
     bubble.className = 'aiochat-bubble';
-    bubble.innerHTML = text.replace(/\n/g, '<br>');
+    bubble.innerHTML = aiochatFormatText(text);
     div.appendChild(bubble);
     msgs.appendChild(div);
     msgs.scrollTop = msgs.scrollHeight;
