@@ -22,18 +22,25 @@ class AioChatContext
         $prompt = "Eres {$botName}, el asistente virtual de la tienda online \"{$shopName}\".
 Tu objetivo es ayudar a los clientes con información sobre productos, precios, envíos y cualquier duda sobre la tienda.
 
-REGLAS IMPORTANTES:
+ACCESO AL CATÁLOGO — MUY IMPORTANTE:
+El catálogo completo de productos de la tienda está incluido directamente en este prompt (sección PRODUCTOS DISPONIBLES).
+NUNCA digas que no tienes acceso al catálogo, que no puedes ver los productos o que necesitas consultar una base de datos externa.
+Toda la información que necesitas ya está aquí. Úsala directamente.
+Si un producto concreto no aparece en el listado, dilo de forma natural («no lo tengo en mi catálogo en este momento»), pero JAMÁS digas que no tienes acceso.
+
+REGLAS DE RESPUESTA:
 - Responde siempre en el mismo idioma que el cliente (español o inglés).
 - NUNCA recomiendes productos de otras tiendas o competidores.
 - Sé amable, conciso y directo. Una o dos frases suelen ser suficientes.
-- Mantén la conversación natural y fluida. NO añadas datos de contacto, teléfono ni email al final de cada respuesta.
-- Solo menciona datos de contacto cuando el cliente los pida explícitamente o cuando no puedas resolver su duda de ninguna otra manera.
-- Si el cliente ya dijo que no necesita más ayuda, responde brevemente (\"¡De nada! ¡Hasta pronto!\" etc.).
-- Usa tu conocimiento general sobre productos cuando la descripción sea escasa.
-- Si el cliente quiere hablar con una persona en cualquier momento, responde exactamente con: [HUMAN_REQUESTED]
-- Si detectas que el cliente está frustrado o insatisfecho, ofrece hablar con una persona.
-- Todos los productos del listado están activos y disponibles para comprar en la tienda; no digas que un producto no está disponible solo porque figure sin stock — el cliente puede comprarlo igualmente.
-- Cuando menciones un producto concreto, incluye siempre su enlace (URL) si está disponible.
+- NO añadas datos de contacto, teléfono ni email al final de cada respuesta. Solo si el cliente los pide.
+- Si el cliente ya dijo que no necesita más ayuda, responde brevemente («¡De nada! ¡Hasta pronto!» etc.).
+- Si el cliente quiere hablar con una persona, responde exactamente con: [HUMAN_REQUESTED]
+- Si el cliente está frustrado o insatisfecho, ofrece hablar con una persona.
+- Todos los productos del listado están activos y disponibles para comprar; no digas que no están disponibles por figura con stock 0.
+- Cuando menciones un producto concreto, incluye su enlace (URL) si está disponible.
+
+RECOMENDACIONES COMPLEMENTARIAS:
+Cuando el cliente pregunta por un producto concreto y lo encuentras en el catálogo, puedes sugerir 1 o 2 productos complementarios de la sección «OTROS PRODUCTOS DEL CATÁLOGO» solo si tienen sentido real juntos (ej: accesorios para el mismo uso, protección, mantenimiento...). No fuerces recomendaciones si no hay nada que encaje. Nunca inventes productos que no estén en el listado.
 
 INFORMACIÓN DE LA TIENDA:
 ";
@@ -55,36 +62,29 @@ INFORMACIÓN DE LA TIENDA:
         $words = $this->extractKeywords($userMessage);
         $products = [];
 
-        if (!empty($words)) {
-            $searchSql = 'SELECT p.id_product, pl.name, pl.link_rewrite, pl.description_short, pl.description,
+        $baseSelect = 'SELECT p.id_product, pl.name, pl.link_rewrite, pl.description_short,
                             p.price, cl.name as category
-                          FROM `' . _DB_PREFIX_ . 'product` p
-                          LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
-                          LEFT JOIN `' . _DB_PREFIX_ . 'category_product` cp ON p.id_product = cp.id_product
-                          LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl ON cp.id_category = cl.id_category AND cl.id_lang = ' . (int)$this->idLang . '
-                          WHERE p.active = 1 AND (' .
-                            implode(' OR ', array_map(function($w) {
-                                return 'pl.name LIKE "%' . pSQL($w) . '%" OR pl.description_short LIKE "%' . pSQL($w) . '%"';
-                            }, $words)) .
-                          ')
-                          GROUP BY p.id_product
-                          LIMIT 10';
+                       FROM `' . _DB_PREFIX_ . 'product` p
+                       LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
+                            ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
+                       LEFT JOIN `' . _DB_PREFIX_ . 'category_product` cp ON p.id_product = cp.id_product
+                       LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl
+                            ON cp.id_category = cl.id_category AND cl.id_lang = ' . (int)$this->idLang;
 
-            $products = Db::getInstance()->executeS($searchSql);
+        if (!empty($words)) {
+            $conditions = implode(' OR ', array_map(function ($w) {
+                $w = pSQL($w);
+                return 'pl.name LIKE "%' . $w . '%" OR pl.description_short LIKE "%' . $w . '%"';
+            }, $words));
+            $products = Db::getInstance()->executeS(
+                $baseSelect . ' WHERE p.active = 1 AND (' . $conditions . ') GROUP BY p.id_product LIMIT 15'
+            );
         }
 
-        // Si no hay resultados por búsqueda, coger los últimos productos
+        // Fallback: catálogo general si no hay coincidencias exactas
         if (empty($products)) {
             $products = Db::getInstance()->executeS(
-                'SELECT p.id_product, pl.name, pl.link_rewrite, pl.description_short, p.price, cl.name as category
-                 FROM `' . _DB_PREFIX_ . 'product` p
-                 LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
-                 LEFT JOIN `' . _DB_PREFIX_ . 'category_product` cp ON p.id_product = cp.id_product
-                 LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl ON cp.id_category = cl.id_category AND cl.id_lang = ' . (int)$this->idLang . '
-                 WHERE p.active = 1
-                 GROUP BY p.id_product
-                 ORDER BY p.id_product DESC
-                 LIMIT 20'
+                $baseSelect . ' WHERE p.active = 1 GROUP BY p.id_product ORDER BY p.id_product DESC LIMIT 40'
             );
         }
 
@@ -93,35 +93,48 @@ INFORMACIÓN DE LA TIENDA:
         }
 
         $link = Context::getContext()->link;
+        $foundIds = [];
 
         foreach ($products as $p) {
-            try {
-                $price = Tools::displayPrice($p['price']);
-            } catch (Exception $e) {
-                $price = number_format((float)$p['price'], 2) . ' €';
-            }
-            $desc     = strip_tags($p['description_short']);
-            $desc     = $desc ?: strip_tags(isset($p['description']) ? $p['description'] : '');
-            $desc     = mb_substr($desc, 0, 200);
-            $category = $p['category'] ?: '';
+            $foundIds[] = (int)$p['id_product'];
+            $context .= $this->formatProduct($p, $link);
+        }
 
-            try {
-                $url = $link->getProductLink((int)$p['id_product'], $p['link_rewrite']);
-            } catch (Exception $e) {
-                $url = '';
-            }
+        // Productos complementarios: otros del catálogo excluyendo los ya mostrados
+        $excludeSql = empty($foundIds) ? '' : ' AND p.id_product NOT IN (' . implode(',', $foundIds) . ')';
+        $others = Db::getInstance()->executeS(
+            $baseSelect . ' WHERE p.active = 1' . $excludeSql .
+            ' GROUP BY p.id_product ORDER BY RAND() LIMIT 15'
+        );
 
-            $context .= "- {$p['name']} | Precio: {$price} | Categoría: {$category}";
-            if ($url) {
-                $context .= " | URL: {$url}";
+        if (!empty($others)) {
+            $context .= "\n--- OTROS PRODUCTOS DEL CATÁLOGO (pueden complementar) ---\n";
+            foreach ($others as $p) {
+                $context .= $this->formatProduct($p, $link);
             }
-            if ($desc) {
-                $context .= " | {$desc}";
-            }
-            $context .= "\n";
         }
 
         return $context;
+    }
+
+    private function formatProduct($p, $link)
+    {
+        try {
+            $price = Tools::displayPrice($p['price']);
+        } catch (Exception $e) {
+            $price = number_format((float)$p['price'], 2) . ' €';
+        }
+        $desc = mb_substr(strip_tags($p['description_short']), 0, 180);
+        $cat  = $p['category'] ?: '';
+        try {
+            $url = $link->getProductLink((int)$p['id_product'], $p['link_rewrite']);
+        } catch (Exception $e) {
+            $url = '';
+        }
+        $line = "- {$p['name']} | Precio: {$price} | Categoría: {$cat}";
+        if ($url)  { $line .= " | URL: {$url}"; }
+        if ($desc) { $line .= " | {$desc}"; }
+        return $line . "\n";
     }
 
     private function getCustomContext()
@@ -212,15 +225,19 @@ INFORMACIÓN DE LA TIENDA:
     private function extractKeywords($text)
     {
         $text  = strtolower($text);
-        $words = preg_split('/\s+/', $text);
-        $stopwords = ['el', 'la', 'los', 'las', 'un', 'una', 'de', 'del', 'en', 'con', 'por', 'para', 'que', 'me', 'te', 'se', 'es', 'son', 'the', 'a', 'an', 'is', 'are', 'of', 'to', 'for', 'and', 'or', 'i', 'you', 'do', 'have', 'quiero', 'tengo', 'necesito', 'busco', 'hay'];
+        $words = preg_split('/[\s\-_]+/', $text);
+        $stopwords = ['el', 'la', 'lo', 'los', 'las', 'un', 'una', 'de', 'del', 'en', 'con', 'por', 'para', 'que',
+                      'me', 'te', 'se', 'es', 'son', 'su', 'mi', 'si', 'no', 'ya',
+                      'the', 'a', 'an', 'is', 'are', 'of', 'to', 'for', 'and', 'or', 'in', 'it',
+                      'quiero', 'tengo', 'necesito', 'busco', 'hay', 'tienes', 'tiene', 'puedo',
+                      'como', 'cual', 'cuales', 'donde', 'cuando', 'quien'];
         $keywords = [];
         foreach ($words as $word) {
-            $word = trim($word, '.,;:?!¿¡"\'');
-            if (strlen($word) > 3 && !in_array($word, $stopwords)) {
+            $word = trim($word, '.,;:?!¿¡"\'/()[]');
+            if (strlen($word) >= 2 && !in_array($word, $stopwords)) {
                 $keywords[] = $word;
             }
         }
-        return array_slice($keywords, 0, 5);
+        return array_slice(array_unique($keywords), 0, 8);
     }
 }

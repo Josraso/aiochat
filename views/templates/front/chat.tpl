@@ -52,9 +52,11 @@
                     💬 Chat en vivo
                 </button>
                 {/if}
+                {if $aiochat_email_enabled}
                 <button onclick="aiochatShowEmail()" class="aiochat-contact-btn aiochat-email">
                     ✉️ Enviar mensaje
                 </button>
+                {/if}
             </div>
             <button onclick="aiochatHideHuman()" class="aiochat-back-btn">← Volver al chat</button>
         </div>

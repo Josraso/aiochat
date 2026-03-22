@@ -70,13 +70,24 @@
         </div>
 
         <div class="form-group">
-            <label class="control-label col-lg-3">Agente disponible (chat en vivo)</label>
+            <label class="control-label col-lg-3">Chat en vivo con agente</label>
             <div class="col-lg-9">
                 <select name="AIOCHAT_AGENT_ONLINE" class="form-control" style="width:auto;">
-                    <option value="1" {if $aiochat_agent_online}selected{/if}>Sí — estoy disponible</option>
-                    <option value="0" {if !$aiochat_agent_online}selected{/if}>No — fuera de línea</option>
+                    <option value="1" {if $aiochat_agent_online}selected{/if}>Activado — estoy disponible</option>
+                    <option value="0" {if !$aiochat_agent_online}selected{/if}>Desactivado — fuera de línea</option>
                 </select>
-                <p class="help-block">Cuando estés disponible, el cliente podrá iniciar un chat en vivo contigo.</p>
+                <p class="help-block">Cuando esté activado, el cliente verá el botón «Chat en vivo» para hablar directamente contigo.</p>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="control-label col-lg-3">Formulario de envío de email</label>
+            <div class="col-lg-9">
+                <select name="AIOCHAT_EMAIL_ENABLED" class="form-control" style="width:auto;">
+                    <option value="1" {if $aiochat_email_enabled}selected{/if}>Activado — el cliente puede enviar un mensaje</option>
+                    <option value="0" {if !$aiochat_email_enabled}selected{/if}>Desactivado — ocultar esta opción</option>
+                </select>
+                <p class="help-block">Controla si aparece el botón «Enviar mensaje» en el panel de contacto humano.</p>
             </div>
         </div>
 
