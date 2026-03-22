@@ -45,6 +45,7 @@
 
 /* Caja del chat */
 #aiochat-box {
+    display: none;
     width: 360px;
     height: 520px;
     background: #ffffff;

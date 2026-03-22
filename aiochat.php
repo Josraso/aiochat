@@ -29,10 +29,7 @@ class AioChat extends Module
     public function install()
     {
         return parent::install()
-            && $this->registerHook('displayFooter')
-            && $this->registerHook('displayFooterBefore')
             && $this->registerHook('displayFooterAfter')
-            && $this->registerHook('displayFooterBuilder')
             && $this->registerHook('displayHeader')
             && $this->createTables();
     }
@@ -191,22 +188,7 @@ class AioChat extends Module
         return '';
     }
 
-    public function hookDisplayFooter($params)
-    {
-        return $this->renderChatWidget();
-    }
-
-    public function hookDisplayFooterBefore($params)
-    {
-        return $this->renderChatWidget();
-    }
-
     public function hookDisplayFooterAfter($params)
-    {
-        return $this->renderChatWidget();
-    }
-
-    public function hookDisplayFooterBuilder($params)
     {
         return $this->renderChatWidget();
     }
