@@ -14,7 +14,7 @@ class AioChatContext
         $this->idShop = Context::getContext()->shop->id;
     }
 
-    public function buildSystemPrompt($userMessage)
+    public function buildSystemPrompt($userMessage, $idCustomer = 0)
     {
         $shopName = Configuration::get('PS_SHOP_NAME');
         $botName  = Configuration::get('AIOCHAT_BOT_NAME') ?: 'Asistente';
@@ -42,6 +42,11 @@ REGLAS DE RESPUESTA:
 RECOMENDACIONES COMPLEMENTARIAS:
 Cuando el cliente pregunta por un producto concreto y lo encuentras en el catálogo, puedes sugerir 1 o 2 productos complementarios de la sección «OTROS PRODUCTOS DEL CATÁLOGO» solo si tienen sentido real juntos (ej: accesorios para el mismo uso, protección, mantenimiento...). No fuerces recomendaciones si no hay nada que encaje. Nunca inventes productos que no estén en el listado.
 
+PEDIDOS DEL CLIENTE:
+- Si la sección «PEDIDOS DEL CLIENTE IDENTIFICADO» está presente, el cliente ha iniciado sesión y puedes darle información sobre SUS pedidos: estado, número de seguimiento y enlace de rastreo.
+- Si el cliente pregunta por un pedido pero no hay sección de pedidos, dile que debe iniciar sesión en su cuenta para que puedas verlos.
+- NUNCA compartas datos de pedidos de otros clientes.
+
 INFORMACIÓN DE LA TIENDA:
 ";
 
@@ -51,6 +56,7 @@ INFORMACIÓN DE LA TIENDA:
             fn() => $this->getShippingContext(),
             fn() => $this->getCmsContext(),
             fn() => $this->getDocumentsContext(),
+            fn() => $idCustomer > 0 ? $this->getCustomerOrdersContext($idCustomer) : '',
         ];
 
         foreach ($sections as $fn) {
@@ -199,44 +205,31 @@ INFORMACIÓN DE LA TIENDA:
     {
         $context = "\n--- TARIFAS DE ENVÍO ---\n";
 
-        // 1. Leer carriers activos
-        $carriers = Db::getInstance()->executeS(
-            'SELECT c.id_carrier, cl.name, c.shipping_method
-             FROM `' . _DB_PREFIX_ . 'carrier` c
-             LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl
-                  ON c.id_carrier = cl.id_carrier AND cl.id_lang = ' . (int)$this->idLang . '
-             WHERE c.active = 1 AND c.deleted = 0
-             LIMIT 10'
-        );
+        // PrestaShop versiona los carriers: al editar uno crea un nuevo id_carrier y marca
+        // el anterior como deleted=1, pero la tabla delivery sigue usando el id_carrier antiguo.
+        // Por eso unimos delivery → carrier_lang directamente sin filtrar por deleted,
+        // y agrupamos por id_carrier + id_zone para evitar ONLY_FULL_GROUP_BY.
+        $rows = Db::getInstance()->executeS('
+            SELECT
+                COALESCE(cl.name, CONCAT("Transportista #", d.id_carrier)) AS carrier_name,
+                MIN(d.price) AS min_price,
+                COALESCE(MAX(z.name), "general")                            AS zone_name
+            FROM `' . _DB_PREFIX_ . 'delivery` d
+            LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl
+                   ON cl.id_carrier = d.id_carrier AND cl.id_lang = ' . (int)$this->idLang . '
+            LEFT JOIN `' . _DB_PREFIX_ . 'zone` z ON z.id_zone = d.id_zone
+            GROUP BY d.id_carrier, d.id_zone
+            ORDER BY carrier_name ASC, min_price ASC
+            LIMIT 30
+        ');
 
-        if (empty($carriers) || $carriers === false) {
+        if (empty($rows) || $rows === false) {
             return $context . "Información de envío no disponible.\n";
         }
 
-        foreach ($carriers as $c) {
-            $carrierId = (int)$c['id_carrier'];
-            $carrierName = $c['name'] ?: "Transportista #{$carrierId}";
-
-            // 2. Precios por zona; MIN/MAX evita ONLY_FULL_GROUP_BY con columnas no agrupadas
-            $deliveries = Db::getInstance()->executeS(
-                'SELECT MIN(d.price) as price, MAX(z.name) as zone_name
-                 FROM `' . _DB_PREFIX_ . 'delivery` d
-                 LEFT JOIN `' . _DB_PREFIX_ . 'zone` z ON d.id_zone = z.id_zone
-                 WHERE d.id_carrier = ' . $carrierId . '
-                 GROUP BY d.id_zone
-                 ORDER BY MIN(d.price) ASC
-                 LIMIT 10'
-            );
-
-            if (!empty($deliveries) && $deliveries !== false) {
-                foreach ($deliveries as $d) {
-                    $zone  = $d['zone_name'] ?: 'general';
-                    $price = Tools::displayPrice((float)$d['price']);
-                    $context .= "- {$carrierName} | Zona: {$zone} | Coste: {$price}\n";
-                }
-            } else {
-                $context .= "- {$carrierName} | (sin tarifas configuradas)\n";
-            }
+        foreach ($rows as $row) {
+            $price    = Tools::displayPrice((float)$row['min_price']);
+            $context .= "- {$row['carrier_name']} | Zona: {$row['zone_name']} | Precio desde: {$price}\n";
         }
 
         return $context;
@@ -262,6 +255,70 @@ INFORMACIÓN DE LA TIENDA:
             $content = strip_tags($page['content']);
             $content = mb_substr($content, 0, 500);
             $context .= "### {$page['meta_title']}\n{$content}\n\n";
+        }
+
+        return $context;
+    }
+
+    private function getCustomerOrdersContext($idCustomer)
+    {
+        $idCustomer = (int)$idCustomer;
+
+        // Datos básicos del cliente
+        $customer = Db::getInstance()->getRow(
+            'SELECT firstname, lastname, email
+             FROM `' . _DB_PREFIX_ . 'customer`
+             WHERE id_customer = ' . $idCustomer . ' AND active = 1'
+        );
+        if (empty($customer)) {
+            return '';
+        }
+
+        $context  = "\n--- PEDIDOS DEL CLIENTE IDENTIFICADO ---\n";
+        $context .= "Cliente: {$customer['firstname']} {$customer['lastname']} ({$customer['email']})\n";
+
+        // Últimos 6 pedidos con estado y tracking
+        $orders = Db::getInstance()->executeS('
+            SELECT
+                o.id_order,
+                o.reference,
+                DATE_FORMAT(o.date_add, "%d/%m/%Y") AS fecha,
+                COALESCE(osl.name, "Desconocido")   AS estado,
+                oc.tracking_number,
+                car.url                              AS carrier_url,
+                car.name                             AS carrier_name
+            FROM `' . _DB_PREFIX_ . 'orders` o
+            LEFT JOIN `' . _DB_PREFIX_ . 'order_state_lang` osl
+                   ON osl.id_order_state = o.current_state AND osl.id_lang = ' . (int)$this->idLang . '
+            LEFT JOIN `' . _DB_PREFIX_ . 'order_carrier` oc
+                   ON oc.id_order_carrier = (
+                       SELECT MAX(id_order_carrier) FROM `' . _DB_PREFIX_ . 'order_carrier`
+                       WHERE id_order = o.id_order
+                   )
+            LEFT JOIN `' . _DB_PREFIX_ . 'carrier` car ON car.id_carrier = oc.id_carrier
+            WHERE o.id_customer = ' . $idCustomer . '
+            ORDER BY o.date_add DESC
+            LIMIT 6
+        ');
+
+        if (empty($orders)) {
+            $context .= "Este cliente no tiene pedidos registrados.\n";
+            return $context;
+        }
+
+        foreach ($orders as $o) {
+            $line = "- Pedido #{$o['reference']} | Fecha: {$o['fecha']} | Estado: {$o['estado']}";
+            if (!empty($o['tracking_number'])) {
+                $line .= " | Nº seguimiento: {$o['tracking_number']}";
+                if (!empty($o['carrier_url'])) {
+                    $trackUrl = str_replace('@', urlencode($o['tracking_number']), $o['carrier_url']);
+                    $line .= " | Rastrear: {$trackUrl}";
+                }
+                if (!empty($o['carrier_name'])) {
+                    $line .= " | Transportista: {$o['carrier_name']}";
+                }
+            }
+            $context .= $line . "\n";
         }
 
         return $context;

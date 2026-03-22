@@ -78,10 +78,14 @@ class AioChatChatModuleFrontController extends ModuleFrontController
         }
         $messages[] = ['role' => 'user', 'content' => $message];
 
+        // Detectar cliente logueado para incluir sus pedidos en el contexto
+        $customer   = Context::getContext()->customer;
+        $idCustomer = ($customer instanceof Customer && $customer->isLogged()) ? (int)$customer->id : 0;
+
         // Construir system prompt con contexto de la tienda
         try {
             $contextBuilder = new AioChatContext();
-            $systemPrompt   = $contextBuilder->buildSystemPrompt($message);
+            $systemPrompt   = $contextBuilder->buildSystemPrompt($message, $idCustomer);
         } catch (Exception $e) {
             PrestaShopLogger::addLog(
                 '[AIOCHAT] Error construyendo system prompt: ' . $e->getMessage() . ' en ' . $e->getFile() . ':' . $e->getLine(),
