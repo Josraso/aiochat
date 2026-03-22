@@ -30,6 +30,9 @@ class AioChatChatModuleFrontController extends ModuleFrontController
             case 'send_email':
                 $this->handleSendEmail();
                 break;
+            case 'debug_prompt':
+                $this->handleDebugPrompt();
+                break;
             default:
                 $this->jsonResponse(['error' => 'Acción no válida']);
         }
@@ -80,6 +83,10 @@ class AioChatChatModuleFrontController extends ModuleFrontController
             $contextBuilder = new AioChatContext();
             $systemPrompt   = $contextBuilder->buildSystemPrompt($message);
         } catch (Exception $e) {
+            PrestaShopLogger::addLog(
+                '[AIOCHAT] Error construyendo system prompt: ' . $e->getMessage() . ' en ' . $e->getFile() . ':' . $e->getLine(),
+                3, null, 'AioChat'
+            );
             $shopName     = Configuration::get('PS_SHOP_NAME');
             $botName      = Configuration::get('AIOCHAT_BOT_NAME') ?: 'Asistente';
             $systemPrompt = "Eres {$botName}, el asistente virtual de \"{$shopName}\". Ayuda al cliente con sus preguntas de forma amable y concisa.";
@@ -145,6 +152,34 @@ class AioChatChatModuleFrontController extends ModuleFrontController
             'whatsapp'     => Configuration::get('AIOCHAT_WHATSAPP'),
             'phone'        => Configuration::get('AIOCHAT_PHONE'),
             'agent_online' => (bool)Configuration::get('AIOCHAT_AGENT_ONLINE'),
+        ]);
+    }
+
+    /**
+     * Devuelve el system prompt completo que ve la IA para un mensaje dado.
+     * Solo accesible con el token = API key configurada en el módulo.
+     * Uso: POST action=debug_prompt&token=TU_API_KEY&message=sandalias talla 33
+     */
+    private function handleDebugPrompt()
+    {
+        $token   = Tools::getValue('token');
+        $apiKey  = Configuration::get('AIOCHAT_API_KEY');
+
+        if (!$token || !$apiKey || $token !== $apiKey) {
+            $this->jsonResponse(['error' => 'No autorizado']);
+            return;
+        }
+
+        $message = Tools::getValue('message', '(mensaje de prueba)');
+
+        @error_reporting(E_ALL);
+        $contextBuilder = new AioChatContext();
+        $prompt = $contextBuilder->buildSystemPrompt($message);
+
+        $this->jsonResponse([
+            'message'       => $message,
+            'prompt_length' => strlen($prompt),
+            'prompt'        => $prompt,
         ]);
     }
 

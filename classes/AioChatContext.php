@@ -58,18 +58,19 @@ INFORMACIÓN DE LA TIENDA:
     {
         $context = "\n--- PRODUCTOS DISPONIBLES ---\n";
 
-        // Búsqueda relevante por palabras del mensaje
-        $words = $this->extractKeywords($userMessage);
-        $products = [];
-
-        $baseSelect = 'SELECT p.id_product, pl.name, pl.link_rewrite, pl.description_short,
-                            p.price, cl.name as category
+        // Correlated subquery para categoría → evita GROUP BY con ONLY_FULL_GROUP_BY
+        $baseSelect = 'SELECT p.id_product, pl.name, pl.link_rewrite, pl.description_short, p.price,
+                           (SELECT cl2.name
+                            FROM `' . _DB_PREFIX_ . 'category_product` cp2
+                            LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl2
+                                 ON cp2.id_category = cl2.id_category AND cl2.id_lang = ' . (int)$this->idLang . '
+                            WHERE cp2.id_product = p.id_product LIMIT 1) as category
                        FROM `' . _DB_PREFIX_ . 'product` p
                        LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
-                            ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
-                       LEFT JOIN `' . _DB_PREFIX_ . 'category_product` cp ON p.id_product = cp.id_product
-                       LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl
-                            ON cp.id_category = cl.id_category AND cl.id_lang = ' . (int)$this->idLang;
+                            ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang;
+
+        $words    = $this->extractKeywords($userMessage);
+        $products = [];
 
         if (!empty($words)) {
             $conditions = implode(' OR ', array_map(function ($w) {
@@ -77,34 +78,39 @@ INFORMACIÓN DE LA TIENDA:
                 return 'pl.name LIKE "%' . $w . '%" OR pl.description_short LIKE "%' . $w . '%"';
             }, $words));
             $products = Db::getInstance()->executeS(
-                $baseSelect . ' WHERE p.active = 1 AND (' . $conditions . ') GROUP BY p.id_product LIMIT 15'
+                $baseSelect . ' WHERE p.active = 1 AND (' . $conditions . ') LIMIT 15'
             );
+            if ($products === false) {
+                $products = [];
+            }
         }
 
         // Fallback: catálogo general si no hay coincidencias exactas
         if (empty($products)) {
             $products = Db::getInstance()->executeS(
-                $baseSelect . ' WHERE p.active = 1 GROUP BY p.id_product ORDER BY p.id_product DESC LIMIT 40'
+                $baseSelect . ' WHERE p.active = 1 ORDER BY p.id_product DESC LIMIT 40'
             );
+            if ($products === false) {
+                $products = [];
+            }
         }
 
         if (empty($products)) {
             return $context . "No hay productos disponibles.\n";
         }
 
-        $link = Context::getContext()->link;
+        $link     = Context::getContext()->link;
         $foundIds = [];
 
         foreach ($products as $p) {
             $foundIds[] = (int)$p['id_product'];
-            $context .= $this->formatProduct($p, $link);
+            $context   .= $this->formatProduct($p, $link);
         }
 
         // Productos complementarios: otros del catálogo excluyendo los ya mostrados
         $excludeSql = empty($foundIds) ? '' : ' AND p.id_product NOT IN (' . implode(',', $foundIds) . ')';
         $others = Db::getInstance()->executeS(
-            $baseSelect . ' WHERE p.active = 1' . $excludeSql .
-            ' GROUP BY p.id_product ORDER BY RAND() LIMIT 15'
+            $baseSelect . ' WHERE p.active = 1' . $excludeSql . ' ORDER BY RAND() LIMIT 15'
         );
 
         if (!empty($others)) {
@@ -150,29 +156,44 @@ INFORMACIÓN DE LA TIENDA:
     {
         $context = "\n--- TARIFAS DE ENVÍO ---\n";
 
+        // 1. Leer carriers activos
         $carriers = Db::getInstance()->executeS(
-            'SELECT c.id_carrier, cl.name, c.url, c.active,
-                    cd.price as price_range_start,
-                    cr.price as shipping_price,
-                    z.name as zone_name
+            'SELECT c.id_carrier, cl.name, c.shipping_method
              FROM `' . _DB_PREFIX_ . 'carrier` c
-             LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl ON c.id_carrier = cl.id_carrier AND cl.id_lang = ' . (int)$this->idLang . '
-             LEFT JOIN `' . _DB_PREFIX_ . 'delivery` cr ON c.id_carrier = cr.id_carrier
-             LEFT JOIN `' . _DB_PREFIX_ . 'range_price` cd ON cr.id_range_price = cd.id_range_price
-             LEFT JOIN `' . _DB_PREFIX_ . 'zone` z ON cr.id_zone = z.id_zone
+             LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl
+                  ON c.id_carrier = cl.id_carrier AND cl.id_lang = ' . (int)$this->idLang . '
              WHERE c.active = 1 AND c.deleted = 0
-             GROUP BY c.id_carrier, z.id_zone
-             LIMIT 20'
+             LIMIT 10'
         );
 
-        if (empty($carriers)) {
+        if (empty($carriers) || $carriers === false) {
             return $context . "Información de envío no disponible.\n";
         }
 
         foreach ($carriers as $c) {
-            $price = isset($c['shipping_price']) ? Tools::displayPrice($c['shipping_price']) : 'variable';
-            $zone  = $c['zone_name'] ?: 'general';
-            $context .= "- {$c['name']} | Zona: {$zone} | Coste: {$price}\n";
+            $carrierId = (int)$c['id_carrier'];
+            $carrierName = $c['name'] ?: "Transportista #{$carrierId}";
+
+            // 2. Precios por zona (delivery + zone), compatible con price y weight ranges
+            $deliveries = Db::getInstance()->executeS(
+                'SELECT d.price, z.name as zone_name
+                 FROM `' . _DB_PREFIX_ . 'delivery` d
+                 LEFT JOIN `' . _DB_PREFIX_ . 'zone` z ON d.id_zone = z.id_zone
+                 WHERE d.id_carrier = ' . $carrierId . '
+                 GROUP BY d.id_zone
+                 ORDER BY d.price ASC
+                 LIMIT 10'
+            );
+
+            if (!empty($deliveries) && $deliveries !== false) {
+                foreach ($deliveries as $d) {
+                    $zone  = $d['zone_name'] ?: 'general';
+                    $price = Tools::displayPrice((float)$d['price']);
+                    $context .= "- {$carrierName} | Zona: {$zone} | Coste: {$price}\n";
+                }
+            } else {
+                $context .= "- {$carrierName} | (sin tarifas configuradas)\n";
+            }
         }
 
         return $context;
