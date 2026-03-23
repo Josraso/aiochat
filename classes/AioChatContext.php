@@ -133,11 +133,10 @@ INFORMACIÓN DE LA TIENDA:
                        FROM `' . _DB_PREFIX_ . 'product` p
                        LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
                             ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
-                       INNER JOIN (
+                       LEFT JOIN (
                            SELECT id_product, SUM(quantity) AS total_stock
                            FROM `' . _DB_PREFIX_ . 'stock_available`
                            GROUP BY id_product
-                           HAVING SUM(quantity) > 0
                        ) sa ON sa.id_product = p.id_product';
 
         $words    = $this->extractKeywords($userMessage);
@@ -149,7 +148,7 @@ INFORMACIÓN DE LA TIENDA:
                 return 'pl.name LIKE "%' . $w . '%" OR pl.description_short LIKE "%' . $w . '%"';
             }, $words));
             $products = Db::getInstance()->executeS(
-                $baseSelect . ' WHERE p.active = 1 AND (' . $conditions . ') LIMIT 15'
+                $baseSelect . ' WHERE p.active = 1 AND (sa.total_stock IS NULL OR sa.total_stock > 0) AND (' . $conditions . ') LIMIT 15'
             );
             if ($products === false) {
                 $products = [];
@@ -159,7 +158,7 @@ INFORMACIÓN DE LA TIENDA:
         // Fallback: catálogo general si no hay coincidencias exactas
         if (empty($products)) {
             $products = Db::getInstance()->executeS(
-                $baseSelect . ' WHERE p.active = 1 ORDER BY p.id_product DESC LIMIT 40'
+                $baseSelect . ' WHERE p.active = 1 AND (sa.total_stock IS NULL OR sa.total_stock > 0) ORDER BY p.id_product DESC LIMIT 40'
             );
             if ($products === false) {
                 $products = [];
@@ -181,7 +180,7 @@ INFORMACIÓN DE LA TIENDA:
         // Productos complementarios: otros del catálogo excluyendo los ya mostrados
         $excludeSql = empty($foundIds) ? '' : ' AND p.id_product NOT IN (' . implode(',', $foundIds) . ')';
         $others = Db::getInstance()->executeS(
-            $baseSelect . ' WHERE p.active = 1' . $excludeSql . ' ORDER BY RAND() LIMIT 15'
+            $baseSelect . ' WHERE p.active = 1 AND (sa.total_stock IS NULL OR sa.total_stock > 0)' . $excludeSql . ' ORDER BY RAND() LIMIT 15'
         );
 
         if (!empty($others)) {
@@ -231,47 +230,80 @@ INFORMACIÓN DE LA TIENDA:
         $idCountry = (int)Configuration::get('PS_COUNTRY_DEFAULT');
         $idLang    = (int)$this->idLang;
 
-        // Subquery de precios: mínimo por carrier (price>0) y umbral gratis (price=0)
-        // Subquery de IVA: tipo máximo para el país por defecto desde tax_rule (singular, sin 's')
-        // Query principal: solo carriers activos y no borrados (active=1, deleted=0)
-        // No hay GROUP BY en columnas no agregadas → compatible con ONLY_FULL_GROUP_BY
-        $rows = Db::getInstance()->executeS('
-            SELECT
-                COALESCE(cl.name, c.name)      AS carrier_name,
-                cl.delay,
-                c.is_free,
-                COALESCE(tax.rate, 0)          AS tax_rate,
-                pr.min_price,
-                pr.free_from_amount
-            FROM `' . _DB_PREFIX_ . 'carrier` c
-            LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl
-                   ON cl.id_carrier = c.id_carrier AND cl.id_lang = ' . $idLang . '
-            LEFT JOIN (
-                SELECT trg.id_tax_rules_group, MAX(t.rate) AS rate
-                FROM `' . _DB_PREFIX_ . 'tax_rules_group` trg
-                JOIN `' . _DB_PREFIX_ . 'tax_rule` tr
-                  ON tr.id_tax_rules_group = trg.id_tax_rules_group
-                 AND tr.id_country = ' . $idCountry . '
-                JOIN `' . _DB_PREFIX_ . 'tax` t
-                  ON t.id_tax = tr.id_tax AND t.active = 1
-                WHERE trg.active = 1
-                GROUP BY trg.id_tax_rules_group
-            ) tax ON tax.id_tax_rules_group = c.id_tax_rules_group
-            LEFT JOIN (
+        // Query con IVA: subquery tax usa ps_tax_rule (singular, tabla real en PS 1.7)
+        // Si la tabla no existe o la query falla, se usa fallback sin cálculo de IVA
+        $rows = false;
+        try {
+            $rows = Db::getInstance()->executeS('
                 SELECT
-                    d.id_carrier,
-                    MIN(CASE WHEN d.price > 0 THEN d.price ELSE NULL END)  AS min_price,
-                    MIN(CASE WHEN d.price = 0 AND rp.delimiter1 IS NOT NULL
-                             THEN rp.delimiter1 ELSE NULL END)              AS free_from_amount
-                FROM `' . _DB_PREFIX_ . 'delivery` d
-                LEFT JOIN `' . _DB_PREFIX_ . 'range_price` rp
-                       ON rp.id_range_price = d.id_range_price
-                GROUP BY d.id_carrier
-            ) pr ON pr.id_carrier = c.id_carrier
-            WHERE c.active = 1 AND c.deleted = 0
-            ORDER BY carrier_name ASC
-            LIMIT 20
-        ');
+                    COALESCE(cl.name, c.name)      AS carrier_name,
+                    cl.delay,
+                    c.is_free,
+                    COALESCE(tax.rate, 0)           AS tax_rate,
+                    pr.min_price,
+                    pr.free_from_amount
+                FROM `' . _DB_PREFIX_ . 'carrier` c
+                LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl
+                       ON cl.id_carrier = c.id_carrier AND cl.id_lang = ' . $idLang . '
+                LEFT JOIN (
+                    SELECT trg.id_tax_rules_group, MAX(t.rate) AS rate
+                    FROM `' . _DB_PREFIX_ . 'tax_rules_group` trg
+                    JOIN `' . _DB_PREFIX_ . 'tax_rule` tr
+                      ON tr.id_tax_rules_group = trg.id_tax_rules_group
+                     AND tr.id_country = ' . $idCountry . '
+                    JOIN `' . _DB_PREFIX_ . 'tax` t
+                      ON t.id_tax = tr.id_tax AND t.active = 1
+                    WHERE trg.active = 1
+                    GROUP BY trg.id_tax_rules_group
+                ) tax ON tax.id_tax_rules_group = c.id_tax_rules_group
+                LEFT JOIN (
+                    SELECT
+                        d.id_carrier,
+                        MIN(CASE WHEN d.price > 0 THEN d.price ELSE NULL END)  AS min_price,
+                        MIN(CASE WHEN d.price = 0 AND rp.delimiter1 IS NOT NULL
+                                 THEN rp.delimiter1 ELSE NULL END)              AS free_from_amount
+                    FROM `' . _DB_PREFIX_ . 'delivery` d
+                    LEFT JOIN `' . _DB_PREFIX_ . 'range_price` rp
+                           ON rp.id_range_price = d.id_range_price
+                    GROUP BY d.id_carrier
+                ) pr ON pr.id_carrier = c.id_carrier
+                WHERE c.active = 1 AND c.deleted = 0
+                ORDER BY carrier_name ASC
+                LIMIT 20
+            ');
+        } catch (Exception $e) {
+            PrestaShopLogger::addLog('[AIOCHAT] shipping query con IVA falló: ' . $e->getMessage(), 2, null, 'AioChat');
+        }
+
+        // Fallback sin IVA si la query anterior falló
+        if (empty($rows) || $rows === false) {
+            try {
+                $raw = Db::getInstance()->executeS('
+                    SELECT
+                        COALESCE(cl.name, c.name)  AS carrier_name,
+                        cl.delay,
+                        c.is_free,
+                        0                          AS tax_rate,
+                        MIN(CASE WHEN d.price > 0 THEN d.price ELSE NULL END) AS min_price,
+                        MIN(CASE WHEN d.price = 0 AND rp.delimiter1 IS NOT NULL
+                                 THEN rp.delimiter1 ELSE NULL END)             AS free_from_amount
+                    FROM `' . _DB_PREFIX_ . 'carrier` c
+                    LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl
+                           ON cl.id_carrier = c.id_carrier AND cl.id_lang = ' . $idLang . '
+                    LEFT JOIN `' . _DB_PREFIX_ . 'delivery` d ON d.id_carrier = c.id_carrier
+                    LEFT JOIN `' . _DB_PREFIX_ . 'range_price` rp ON rp.id_range_price = d.id_range_price
+                    WHERE c.active = 1 AND c.deleted = 0
+                    GROUP BY c.id_carrier, cl.name, c.name, cl.delay, c.is_free
+                    ORDER BY carrier_name ASC
+                    LIMIT 20
+                ');
+                if (!empty($raw)) {
+                    $rows = $raw;
+                }
+            } catch (Exception $e2) {
+                PrestaShopLogger::addLog('[AIOCHAT] shipping fallback también falló: ' . $e2->getMessage(), 3, null, 'AioChat');
+            }
+        }
 
         if (empty($rows) || $rows === false) {
             return $context . "Información de envío no disponible.\n";

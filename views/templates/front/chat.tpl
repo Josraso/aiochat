@@ -151,15 +151,13 @@ if (!AIOCHAT.sessionId) {
 
 function aiochatPersist() {
     localStorage.setItem('aiochat_history_' + AIOCHAT.sessionId, JSON.stringify(AIOCHAT.history));
-    var nodes = document.getElementById('aiochat-messages').querySelectorAll('.aiochat-msg');
-    var msgs = [];
-    nodes.forEach(function(n) {
-        var bubble = n.querySelector('.aiochat-bubble');
-        if (!bubble) return;
-        var sender = n.classList.contains('aiochat-customer') ? 'customer' : 'bot';
-        msgs.push({t: bubble.innerHTML.replace(/<br>/g, '\n'), s: sender});
+    // Guardar texto original (markdown crudo de AIOCHAT.history), no el innerHTML ya renderizado.
+    // Si se guardara innerHTML y luego aiochatFormatText lo volviera a procesar,
+    // los <a> y <strong> se escaparían y se verían como código HTML en pantalla.
+    var msgs = AIOCHAT.history.slice(-30).map(function(h) {
+        return {t: h.content, s: h.role === 'user' ? 'customer' : 'bot'};
     });
-    localStorage.setItem('aiochat_msgs_' + AIOCHAT.sessionId, JSON.stringify(msgs.slice(-30)));
+    localStorage.setItem('aiochat_msgs_' + AIOCHAT.sessionId, JSON.stringify(msgs));
 }
 
 function aiochatClearChat() {
