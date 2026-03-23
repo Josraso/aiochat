@@ -40,8 +40,14 @@ REGLAS DE RESPUESTA:
 - Si el cliente ya dijo que no necesita más ayuda, responde brevemente («¡De nada! ¡Hasta pronto!» etc.).
 - Si el cliente quiere hablar con una persona, responde exactamente con: [HUMAN_REQUESTED]
 - Si el cliente está frustrado o insatisfecho, ofrece hablar con una persona.
-- Todos los productos del listado están activos y disponibles para comprar; no digas que no están disponibles por figura con stock 0.
+- Todos los productos del listado tienen stock disponible y se pueden comprar. Si un producto no aparece en el listado es porque está agotado.
 - Cuando menciones un producto concreto, escribe su nombre como enlace Markdown: [Nombre del producto](URL). NUNCA pongas la URL en crudo.
+
+INFORMACIÓN DE ENVÍO — MUY IMPORTANTE:
+La sección «TARIFAS DE ENVÍO» contiene los precios reales con IVA incluido, transportistas activos, plazos de entrega y el importe mínimo a partir del cual el envío es gratuito.
+NUNCA digas que no tienes información de envío. NUNCA reenvíes al cliente a contactar con alguien solo por preguntar el precio del envío o si hay envío gratis.
+Responde SIEMPRE con los datos del listado. Si el envío es gratis a partir de cierto importe, indícalo claramente.
+Solo usa [HUMAN_REQUESTED] para envíos si el cliente tiene una incidencia concreta (paquete perdido, dirección incorrecta, etc.), no para responder tarifas genéricas.
 
 RECOMENDACIONES COMPLEMENTARIAS:
 Cuando el cliente pregunta por un producto concreto y lo encuentras en el catálogo, puedes sugerir 1 o 2 productos complementarios de la sección «OTROS PRODUCTOS DEL CATÁLOGO» solo si tienen sentido real juntos (ej: accesorios para el mismo uso, protección, mantenimiento...). No fuerces recomendaciones si no hay nada que encaje. Nunca inventes productos que no estén en el listado.
@@ -219,24 +225,44 @@ INFORMACIÓN DE LA TIENDA:
 
     private function getShippingContext()
     {
-        $context = "\n--- TARIFAS DE ENVÍO ---\n";
+        $context   = "\n--- TARIFAS DE ENVÍO ---\n";
+        $idCountry = (int)Configuration::get('PS_COUNTRY_DEFAULT');
 
-        // PrestaShop versiona los carriers: al editar uno crea un nuevo id_carrier y marca
-        // el anterior como deleted=1, pero la tabla delivery sigue usando el id_carrier antiguo.
-        // Por eso unimos delivery → carrier_lang directamente sin filtrar por deleted,
-        // y agrupamos por id_carrier + id_zone para evitar ONLY_FULL_GROUP_BY.
+        // PrestaShop versiona carriers: ps_delivery puede referenciar id_carrier antiguo (deleted=1).
+        // Enlazamos ps_delivery → ps_carrier (cualquier versión) → ps_carrier actual (cur_c)
+        // vía id_reference para obtener is_free, delay e IVA del carrier vigente.
         $rows = Db::getInstance()->executeS('
             SELECT
-                COALESCE(cl.name, CONCAT(\'Transportista #\', d.id_carrier)) AS carrier_name,
-                MIN(d.price) AS min_price,
-                COALESCE(MAX(z.name), \'general\')                            AS zone_name
+                COALESCE(cl.name, cur_c.name, CONCAT(\'Transportista #\', d.id_carrier))
+                                                                          AS carrier_name,
+                cl.delay,
+                cur_c.is_free,
+                COALESCE(MAX(t.rate), 0)                                  AS tax_rate,
+                MIN(CASE WHEN d.price > 0 THEN d.price ELSE NULL END)     AS min_price,
+                MAX(CASE WHEN d.price > 0 THEN d.price ELSE NULL END)     AS max_price,
+                MIN(CASE WHEN d.price = 0 AND rp.delimiter1 IS NOT NULL
+                         THEN rp.delimiter1 ELSE NULL END)                AS free_from_amount,
+                COALESCE(MAX(z.name), \'general\')                         AS zone_name
             FROM `' . _DB_PREFIX_ . 'delivery` d
+            LEFT JOIN `' . _DB_PREFIX_ . 'carrier` ac
+                   ON ac.id_carrier = d.id_carrier
+            INNER JOIN `' . _DB_PREFIX_ . 'carrier` cur_c
+                    ON cur_c.id_reference = ac.id_reference
+                   AND cur_c.deleted = 0 AND cur_c.active = 1
             LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl
-                   ON cl.id_carrier = d.id_carrier AND cl.id_lang = ' . (int)$this->idLang . '
+                   ON cl.id_carrier = cur_c.id_carrier AND cl.id_lang = ' . (int)$this->idLang . '
             LEFT JOIN `' . _DB_PREFIX_ . 'zone` z ON z.id_zone = d.id_zone
-            GROUP BY d.id_carrier, d.id_zone
+            LEFT JOIN `' . _DB_PREFIX_ . 'range_price` rp ON rp.id_range_price = d.id_range_price
+            LEFT JOIN `' . _DB_PREFIX_ . 'tax_rules_group` trg
+                   ON trg.id_tax_rules_group = cur_c.id_tax_rules_group AND trg.active = 1
+            LEFT JOIN `' . _DB_PREFIX_ . 'tax_rules` tr
+                   ON tr.id_tax_rules_group = cur_c.id_tax_rules_group
+                  AND tr.id_country = ' . $idCountry . '
+            LEFT JOIN `' . _DB_PREFIX_ . 'tax` t
+                   ON t.id_tax = tr.id_tax AND t.active = 1
+            GROUP BY cur_c.id_carrier, d.id_zone
             ORDER BY carrier_name ASC, min_price ASC
-            LIMIT 30
+            LIMIT 40
         ');
 
         if (empty($rows) || $rows === false) {
@@ -244,8 +270,31 @@ INFORMACIÓN DE LA TIENDA:
         }
 
         foreach ($rows as $row) {
-            $price    = Tools::displayPrice((float)$row['min_price']);
-            $context .= "- {$row['carrier_name']} | Zona: {$row['zone_name']} | Precio desde: {$price}\n";
+            $taxMultiplier = 1 + ((float)$row['tax_rate'] / 100);
+            $line          = '- ' . $row['carrier_name'];
+
+            if ((int)$row['is_free'] === 1) {
+                $line .= ': **ENVÍO GRATUITO**';
+            } elseif ($row['min_price'] !== null) {
+                $priceWithTax = (float)$row['min_price'] * $taxMultiplier;
+                $line .= ': desde ' . Tools::displayPrice($priceWithTax) . ' (IVA incluido)';
+
+                // Indicar si hay tramo gratuito a partir de cierto importe
+                if ($row['free_from_amount'] !== null) {
+                    $line .= ' | **GRATIS** a partir de ' . Tools::displayPrice((float)$row['free_from_amount']);
+                }
+            } else {
+                // Solo tiene tramos gratuitos (todos price=0 → envío siempre gratis)
+                $line .= ': **ENVÍO GRATUITO**';
+            }
+
+            // Plazo de entrega
+            if (!empty($row['delay'])) {
+                $line .= ' | Plazo: ' . $row['delay'];
+            }
+
+            $line .= ' | Zona: ' . $row['zone_name'];
+            $context .= $line . "\n";
         }
 
         return $context;
