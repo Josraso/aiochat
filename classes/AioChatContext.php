@@ -50,9 +50,10 @@ Responde SIEMPRE con los datos del listado. Si el envío es gratis a partir de c
 Solo usa [HUMAN_REQUESTED] para envíos si el cliente tiene una incidencia concreta (paquete perdido, dirección incorrecta, etc.), no para responder tarifas genéricas.
 
 PRODUCTOS — MUY IMPORTANTE:
-- Si el cliente pregunta por un producto concreto y lo encuentras en «PRODUCTOS DISPONIBLES», responde PRIMERO con toda la información de ese producto (precio, descripción, URL). Solo DESPUÉS, si tiene sentido, sugiere 1 o 2 complementarios de «OTROS PRODUCTOS DEL CATÁLOGO».
-- NUNCA respondas que no encuentras un producto sin haber buscado bien en ambas secciones.
-- No repitas el mismo producto varias veces ni generes información inventada sobre productos.
+- La sección «PRODUCTOS DISPONIBLES» contiene el catálogo COMPLETO de la tienda. Todos los productos activos están ahí.
+- NUNCA digas que un producto no está en tu catálogo si no lo has buscado exhaustivamente por nombre, descripción y categoría en esa sección.
+- Si el cliente pregunta por un producto concreto, encuéntralo y responde con su precio, URL y descripción. Puedes sugerir 1-2 complementarios solo después de responder el principal.
+- No generes información inventada sobre productos que no estén en el listado.
 
 PEDIDOS DEL CLIENTE:
 - Si la sección «PEDIDOS DEL CLIENTE IDENTIFICADO» está presente, el cliente ha iniciado sesión.
@@ -121,73 +122,42 @@ INFORMACIÓN DE LA TIENDA:
     {
         $context = "\n--- PRODUCTOS DISPONIBLES ---\n";
 
-        // Correlated subquery para categoría → evita GROUP BY con ONLY_FULL_GROUP_BY
-        // INNER JOIN con stock_available: solo productos con stock total > 0
-        // (cubre tanto productos simples como los que tienen combinaciones)
-        $baseSelect = 'SELECT p.id_product, pl.name, pl.link_rewrite, pl.description_short, p.price,
-                           (SELECT cl2.name
-                            FROM `' . _DB_PREFIX_ . 'category_product` cp2
-                            LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl2
-                                 ON cp2.id_category = cl2.id_category AND cl2.id_lang = ' . (int)$this->idLang . '
-                            WHERE cp2.id_product = p.id_product LIMIT 1) as category,
-                           COALESCE((
-                               SELECT SUM(sa.quantity)
-                               FROM `' . _DB_PREFIX_ . 'stock_available` sa
-                               WHERE sa.id_product = p.id_product
-                           ), -1) AS total_stock
-                       FROM `' . _DB_PREFIX_ . 'product` p
-                       LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
-                            ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang;
+        // Carga TODOS los productos activos de la tienda.
+        // No se usa búsqueda por keywords ni LIMIT pequeño: cualquier producto
+        // puede ser preguntado y debe estar en contexto independientemente de
+        // cuándo se añadió o cuántos keywords coincidan con el mensaje actual.
+        // El stock se incluye como subquery para que la IA pueda indicarlo.
+        $products = Db::getInstance()->executeS('
+            SELECT
+                p.id_product,
+                pl.name,
+                pl.link_rewrite,
+                pl.description_short,
+                p.price,
+                (SELECT cl2.name
+                 FROM `' . _DB_PREFIX_ . 'category_product` cp2
+                 LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl2
+                      ON cp2.id_category = cl2.id_category AND cl2.id_lang = ' . (int)$this->idLang . '
+                 WHERE cp2.id_product = p.id_product LIMIT 1) AS category,
+                COALESCE((
+                    SELECT SUM(sa.quantity)
+                    FROM `' . _DB_PREFIX_ . 'stock_available` sa
+                    WHERE sa.id_product = p.id_product
+                ), -1) AS total_stock
+            FROM `' . _DB_PREFIX_ . 'product` p
+            LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
+                 ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
+            WHERE p.active = 1
+            ORDER BY pl.name ASC
+        ');
 
-        $words    = $this->extractKeywords($userMessage);
-        $products = [];
-
-        if (!empty($words)) {
-            $conditions = implode(' OR ', array_map(function ($w) {
-                $w = pSQL($w);
-                return 'pl.name LIKE "%' . $w . '%" OR pl.description_short LIKE "%' . $w . '%"';
-            }, $words));
-            $products = Db::getInstance()->executeS(
-                $baseSelect . ' WHERE p.active = 1 AND (' . $conditions . ') LIMIT 15'
-            );
-            if ($products === false) {
-                $products = [];
-            }
-        }
-
-        // Fallback: catálogo general si no hay coincidencias exactas
-        if (empty($products)) {
-            $products = Db::getInstance()->executeS(
-                $baseSelect . ' WHERE p.active = 1 ORDER BY p.id_product DESC LIMIT 40'
-            );
-            if ($products === false) {
-                $products = [];
-            }
-        }
-
-        if (empty($products)) {
+        if (empty($products) || $products === false) {
             return $context . "No hay productos disponibles.\n";
         }
 
-        $link     = Context::getContext()->link;
-        $foundIds = [];
-
+        $link = Context::getContext()->link;
         foreach ($products as $p) {
-            $foundIds[] = (int)$p['id_product'];
-            $context   .= $this->formatProduct($p, $link);
-        }
-
-        // Productos complementarios: otros del catálogo excluyendo los ya mostrados
-        $excludeSql = empty($foundIds) ? '' : ' AND p.id_product NOT IN (' . implode(',', $foundIds) . ')';
-        $others = Db::getInstance()->executeS(
-            $baseSelect . ' WHERE p.active = 1' . $excludeSql . ' ORDER BY RAND() LIMIT 15'
-        );
-
-        if (!empty($others)) {
-            $context .= "\n--- OTROS PRODUCTOS DEL CATÁLOGO (pueden complementar) ---\n";
-            foreach ($others as $p) {
-                $context .= $this->formatProduct($p, $link);
-            }
+            $context .= $this->formatProduct($p, $link);
         }
 
         return $context;
@@ -434,6 +404,20 @@ INFORMACIÓN DE LA TIENDA:
                 }
             }
             $context .= $line . "\n";
+
+            // Productos del pedido
+            $items = Db::getInstance()->executeS('
+                SELECT product_name, product_quantity, unit_price_tax_incl
+                FROM `' . _DB_PREFIX_ . 'order_detail`
+                WHERE id_order = ' . (int)$o['id_order'] . '
+                ORDER BY id_order_detail ASC
+            ');
+            if (!empty($items)) {
+                foreach ($items as $item) {
+                    $unitPrice = Tools::displayPrice((float)$item['unit_price_tax_incl']);
+                    $context  .= "    · {$item['product_name']} x{$item['product_quantity']} — {$unitPrice}/ud\n";
+                }
+            }
         }
 
         return $context;

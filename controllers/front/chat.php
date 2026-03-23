@@ -83,9 +83,17 @@ class AioChatChatModuleFrontController extends ModuleFrontController
         $idCustomer = ($customer instanceof Customer && $customer->isLogged()) ? (int)$customer->id : 0;
 
         // Construir system prompt con contexto de la tienda
+        // Se pasan los últimos 4 mensajes del historial para que la búsqueda
+        // de productos use contexto de la conversación, no solo el mensaje actual
+        $searchContext = $message;
+        foreach (array_slice($history, -4) as $h) {
+            if (isset($h['content'])) {
+                $searchContext .= ' ' . $h['content'];
+            }
+        }
         try {
             $contextBuilder = new AioChatContext();
-            $systemPrompt   = $contextBuilder->buildSystemPrompt($message, $idCustomer);
+            $systemPrompt   = $contextBuilder->buildSystemPrompt($searchContext, $idCustomer);
         } catch (Exception $e) {
             PrestaShopLogger::addLog(
                 '[AIOCHAT] Error construyendo system prompt: ' . $e->getMessage() . ' en ' . $e->getFile() . ':' . $e->getLine(),
