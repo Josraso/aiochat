@@ -114,6 +114,8 @@ INFORMACIÓN DE LA TIENDA:
         $context = "\n--- PRODUCTOS DISPONIBLES ---\n";
 
         // Correlated subquery para categoría → evita GROUP BY con ONLY_FULL_GROUP_BY
+        // INNER JOIN con stock_available: solo productos con stock total > 0
+        // (cubre tanto productos simples como los que tienen combinaciones)
         $baseSelect = 'SELECT p.id_product, pl.name, pl.link_rewrite, pl.description_short, p.price,
                            (SELECT cl2.name
                             FROM `' . _DB_PREFIX_ . 'category_product` cp2
@@ -122,7 +124,13 @@ INFORMACIÓN DE LA TIENDA:
                             WHERE cp2.id_product = p.id_product LIMIT 1) as category
                        FROM `' . _DB_PREFIX_ . 'product` p
                        LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
-                            ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang;
+                            ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
+                       INNER JOIN (
+                           SELECT id_product, SUM(quantity) AS total_stock
+                           FROM `' . _DB_PREFIX_ . 'stock_available`
+                           GROUP BY id_product
+                           HAVING SUM(quantity) > 0
+                       ) sa ON sa.id_product = p.id_product';
 
         $words    = $this->extractKeywords($userMessage);
         $products = [];

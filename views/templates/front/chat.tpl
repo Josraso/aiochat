@@ -105,13 +105,29 @@ var AIOCHAT = {
     lastMessageTime: null,
     customerName: '{$aiochat_customer_name|escape:'javascript':'UTF-8'}',
     customerEmail: '{$aiochat_customer_email|escape:'javascript':'UTF-8'}',
+    customerId: {$aiochat_customer_id|intval},
     agentOnline: {if $aiochat_agent_online}true{else}false{/if},
     welcomeMsg: '{$aiochat_welcome_msg|escape:'javascript':'UTF-8'}',
     isTyping: false,
     opened: false
 };
 {literal}
-// Generar session ID único
+// Generar/restaurar session ID y limpiar si el cliente cambió (login/logout)
+(function() {
+    var storedCid = localStorage.getItem('aiochat_customer_id');
+    var currentCid = String(AIOCHAT.customerId);
+    // Si el customer_id cambió (login, logout o cambio de cuenta) → sesión nueva
+    if (storedCid !== null && storedCid !== currentCid) {
+        localStorage.removeItem('aiochat_session');
+        var oldSid = localStorage.getItem('aiochat_session_prev');
+        if (oldSid) {
+            localStorage.removeItem('aiochat_history_' + oldSid);
+            localStorage.removeItem('aiochat_msgs_' + oldSid);
+        }
+    }
+    localStorage.setItem('aiochat_customer_id', currentCid);
+})();
+
 AIOCHAT.sessionId = localStorage.getItem('aiochat_session');
 if (!AIOCHAT.sessionId) {
     AIOCHAT.sessionId = 'ac_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();

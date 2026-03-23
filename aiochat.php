@@ -415,6 +415,7 @@ class AioChat extends Module
             'aiochat_live_url'     => $this->context->link->getModuleLink($this->name, 'livechat'),
             'aiochat_customer_name'  => $customer->isLogged() ? $customer->firstname . ' ' . $customer->lastname : '',
             'aiochat_customer_email' => $customer->isLogged() ? $customer->email : '',
+            'aiochat_customer_id'    => $customer->isLogged() ? (int)$customer->id : 0,
             'aiochat_position'     => Configuration::get('AIOCHAT_POSITION') ?: 'right',
         ]);
 
