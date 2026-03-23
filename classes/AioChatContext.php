@@ -59,12 +59,12 @@ INFORMACIÓN DE LA TIENDA:
 ";
 
         $sections = [
-            fn() => $this->getCustomContext(),
-            fn() => $this->getProductsContext($userMessage),
-            fn() => $this->getShippingContext(),
-            fn() => $this->getCmsContext(),
-            fn() => $this->getDocumentsContext(),
-            fn() => $idCustomer > 0 ? $this->getCustomerOrdersContext($idCustomer) : '',
+            function () { return $this->getCustomContext(); },
+            function () use ($userMessage) { return $this->getProductsContext($userMessage); },
+            function () { return $this->getShippingContext(); },
+            function () { return $this->getCmsContext(); },
+            function () { return $this->getDocumentsContext(); },
+            function () use ($idCustomer) { return $idCustomer > 0 ? $this->getCustomerOrdersContext($idCustomer) : ''; },
         ];
 
         foreach ($sections as $fn) {
@@ -84,11 +84,11 @@ INFORMACIÓN DE LA TIENDA:
     public function diagnoseContext($testMessage = 'prueba')
     {
         $sections = [
-            'custom'   => fn() => $this->getCustomContext(),
-            'products' => fn() => $this->getProductsContext($testMessage),
-            'shipping' => fn() => $this->getShippingContext(),
-            'cms'      => fn() => $this->getCmsContext(),
-            'docs'     => fn() => $this->getDocumentsContext(),
+            'custom'   => function () { return $this->getCustomContext(); },
+            'products' => function () use ($testMessage) { return $this->getProductsContext($testMessage); },
+            'shipping' => function () { return $this->getShippingContext(); },
+            'cms'      => function () { return $this->getCmsContext(); },
+            'docs'     => function () { return $this->getDocumentsContext(); },
         ];
 
         $report = [];
