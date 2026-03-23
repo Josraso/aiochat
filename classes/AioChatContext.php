@@ -49,8 +49,10 @@ NUNCA digas que no tienes información de envío. NUNCA reenvíes al cliente a c
 Responde SIEMPRE con los datos del listado. Si el envío es gratis a partir de cierto importe, indícalo claramente.
 Solo usa [HUMAN_REQUESTED] para envíos si el cliente tiene una incidencia concreta (paquete perdido, dirección incorrecta, etc.), no para responder tarifas genéricas.
 
-RECOMENDACIONES COMPLEMENTARIAS:
-Cuando el cliente pregunta por un producto concreto y lo encuentras en el catálogo, puedes sugerir 1 o 2 productos complementarios de la sección «OTROS PRODUCTOS DEL CATÁLOGO» solo si tienen sentido real juntos (ej: accesorios para el mismo uso, protección, mantenimiento...). No fuerces recomendaciones si no hay nada que encaje. Nunca inventes productos que no estén en el listado.
+PRODUCTOS — MUY IMPORTANTE:
+- Si el cliente pregunta por un producto concreto y lo encuentras en «PRODUCTOS DISPONIBLES», responde PRIMERO con toda la información de ese producto (precio, descripción, URL). Solo DESPUÉS, si tiene sentido, sugiere 1 o 2 complementarios de «OTROS PRODUCTOS DEL CATÁLOGO».
+- NUNCA respondas que no encuentras un producto sin haber buscado bien en ambas secciones.
+- No repitas el mismo producto varias veces ni generes información inventada sobre productos.
 
 PEDIDOS DEL CLIENTE:
 - Si la sección «PEDIDOS DEL CLIENTE IDENTIFICADO» está presente, el cliente ha iniciado sesión.
@@ -227,42 +229,48 @@ INFORMACIÓN DE LA TIENDA:
     {
         $context   = "\n--- TARIFAS DE ENVÍO ---\n";
         $idCountry = (int)Configuration::get('PS_COUNTRY_DEFAULT');
+        $idLang    = (int)$this->idLang;
 
-        // PrestaShop versiona carriers: ps_delivery puede referenciar id_carrier antiguo (deleted=1).
-        // Enlazamos ps_delivery → ps_carrier (cualquier versión) → ps_carrier actual (cur_c)
-        // vía id_reference para obtener is_free, delay e IVA del carrier vigente.
+        // Subquery de precios: mínimo por carrier (price>0) y umbral gratis (price=0)
+        // Subquery de IVA: tipo máximo para el país por defecto desde tax_rule (singular, sin 's')
+        // Query principal: solo carriers activos y no borrados (active=1, deleted=0)
+        // No hay GROUP BY en columnas no agregadas → compatible con ONLY_FULL_GROUP_BY
         $rows = Db::getInstance()->executeS('
             SELECT
-                COALESCE(cl.name, cur_c.name, CONCAT(\'Transportista #\', d.id_carrier))
-                                                                          AS carrier_name,
+                COALESCE(cl.name, c.name)      AS carrier_name,
                 cl.delay,
-                cur_c.is_free,
-                COALESCE(MAX(t.rate), 0)                                  AS tax_rate,
-                MIN(CASE WHEN d.price > 0 THEN d.price ELSE NULL END)     AS min_price,
-                MAX(CASE WHEN d.price > 0 THEN d.price ELSE NULL END)     AS max_price,
-                MIN(CASE WHEN d.price = 0 AND rp.delimiter1 IS NOT NULL
-                         THEN rp.delimiter1 ELSE NULL END)                AS free_from_amount,
-                COALESCE(MAX(z.name), \'general\')                         AS zone_name
-            FROM `' . _DB_PREFIX_ . 'delivery` d
-            LEFT JOIN `' . _DB_PREFIX_ . 'carrier` ac
-                   ON ac.id_carrier = d.id_carrier
-            INNER JOIN `' . _DB_PREFIX_ . 'carrier` cur_c
-                    ON cur_c.id_reference = ac.id_reference
-                   AND cur_c.deleted = 0 AND cur_c.active = 1
+                c.is_free,
+                COALESCE(tax.rate, 0)          AS tax_rate,
+                pr.min_price,
+                pr.free_from_amount
+            FROM `' . _DB_PREFIX_ . 'carrier` c
             LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl
-                   ON cl.id_carrier = cur_c.id_carrier AND cl.id_lang = ' . (int)$this->idLang . '
-            LEFT JOIN `' . _DB_PREFIX_ . 'zone` z ON z.id_zone = d.id_zone
-            LEFT JOIN `' . _DB_PREFIX_ . 'range_price` rp ON rp.id_range_price = d.id_range_price
-            LEFT JOIN `' . _DB_PREFIX_ . 'tax_rules_group` trg
-                   ON trg.id_tax_rules_group = cur_c.id_tax_rules_group AND trg.active = 1
-            LEFT JOIN `' . _DB_PREFIX_ . 'tax_rules` tr
-                   ON tr.id_tax_rules_group = cur_c.id_tax_rules_group
-                  AND tr.id_country = ' . $idCountry . '
-            LEFT JOIN `' . _DB_PREFIX_ . 'tax` t
-                   ON t.id_tax = tr.id_tax AND t.active = 1
-            GROUP BY cur_c.id_carrier, d.id_zone
-            ORDER BY carrier_name ASC, min_price ASC
-            LIMIT 40
+                   ON cl.id_carrier = c.id_carrier AND cl.id_lang = ' . $idLang . '
+            LEFT JOIN (
+                SELECT trg.id_tax_rules_group, MAX(t.rate) AS rate
+                FROM `' . _DB_PREFIX_ . 'tax_rules_group` trg
+                JOIN `' . _DB_PREFIX_ . 'tax_rule` tr
+                  ON tr.id_tax_rules_group = trg.id_tax_rules_group
+                 AND tr.id_country = ' . $idCountry . '
+                JOIN `' . _DB_PREFIX_ . 'tax` t
+                  ON t.id_tax = tr.id_tax AND t.active = 1
+                WHERE trg.active = 1
+                GROUP BY trg.id_tax_rules_group
+            ) tax ON tax.id_tax_rules_group = c.id_tax_rules_group
+            LEFT JOIN (
+                SELECT
+                    d.id_carrier,
+                    MIN(CASE WHEN d.price > 0 THEN d.price ELSE NULL END)  AS min_price,
+                    MIN(CASE WHEN d.price = 0 AND rp.delimiter1 IS NOT NULL
+                             THEN rp.delimiter1 ELSE NULL END)              AS free_from_amount
+                FROM `' . _DB_PREFIX_ . 'delivery` d
+                LEFT JOIN `' . _DB_PREFIX_ . 'range_price` rp
+                       ON rp.id_range_price = d.id_range_price
+                GROUP BY d.id_carrier
+            ) pr ON pr.id_carrier = c.id_carrier
+            WHERE c.active = 1 AND c.deleted = 0
+            ORDER BY carrier_name ASC
+            LIMIT 20
         ');
 
         if (empty($rows) || $rows === false) {
@@ -274,26 +282,22 @@ INFORMACIÓN DE LA TIENDA:
             $line          = '- ' . $row['carrier_name'];
 
             if ((int)$row['is_free'] === 1) {
-                $line .= ': **ENVÍO GRATUITO**';
+                $line .= ': ENVÍO GRATUITO';
             } elseif ($row['min_price'] !== null) {
                 $priceWithTax = (float)$row['min_price'] * $taxMultiplier;
                 $line .= ': desde ' . Tools::displayPrice($priceWithTax) . ' (IVA incluido)';
 
-                // Indicar si hay tramo gratuito a partir de cierto importe
                 if ($row['free_from_amount'] !== null) {
-                    $line .= ' | **GRATIS** a partir de ' . Tools::displayPrice((float)$row['free_from_amount']);
+                    $line .= ' | GRATIS a partir de ' . Tools::displayPrice((float)$row['free_from_amount']);
                 }
             } else {
-                // Solo tiene tramos gratuitos (todos price=0 → envío siempre gratis)
-                $line .= ': **ENVÍO GRATUITO**';
+                $line .= ': ENVÍO GRATUITO';
             }
 
-            // Plazo de entrega
             if (!empty($row['delay'])) {
                 $line .= ' | Plazo: ' . $row['delay'];
             }
 
-            $line .= ' | Zona: ' . $row['zone_name'];
             $context .= $line . "\n";
         }
 
