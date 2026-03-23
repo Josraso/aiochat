@@ -40,7 +40,9 @@ REGLAS DE RESPUESTA:
 - Si el cliente ya dijo que no necesita más ayuda, responde brevemente («¡De nada! ¡Hasta pronto!» etc.).
 - Si el cliente quiere hablar con una persona, responde exactamente con: [HUMAN_REQUESTED]
 - Si el cliente está frustrado o insatisfecho, ofrece hablar con una persona.
-- Cada producto del listado incluye su estado de stock: «En stock», «Sin stock» o «Stock desconocido». Para recomendar productos da prioridad a los que tienen «En stock», pero si el cliente pregunta específicamente por un producto concreto, responde siempre con su información completa independientemente del stock, indicando si está agotado.
+- La sección «PRODUCTOS DISPONIBLES» es el índice completo. Cada línea: Nombre | Precio | Stock (S=en stock, X=sin stock, ?=desconocido) | URL.
+- La sección «DETALLE DE PRODUCTOS RELACIONADOS» añade descripción y categoría para los productos más relevantes de la consulta actual.
+- Para recomendar prioriza productos con S (en stock). Si el cliente pregunta por un producto concreto, respóndele siempre con su información aunque tenga X, indicando que está agotado.
 - Cuando menciones un producto concreto, escribe su nombre como enlace Markdown: [Nombre del producto](URL). NUNCA pongas la URL en crudo.
 
 INFORMACIÓN DE ENVÍO — MUY IMPORTANTE:
@@ -121,24 +123,17 @@ INFORMACIÓN DE LA TIENDA:
     private function getProductsContext($userMessage)
     {
         $context = "\n--- PRODUCTOS DISPONIBLES ---\n";
+        $idLang  = (int)$this->idLang;
 
-        // Carga TODOS los productos activos de la tienda.
-        // No se usa búsqueda por keywords ni LIMIT pequeño: cualquier producto
-        // puede ser preguntado y debe estar en contexto independientemente de
-        // cuándo se añadió o cuántos keywords coincidan con el mensaje actual.
-        // El stock se incluye como subquery para que la IA pueda indicarlo.
-        $products = Db::getInstance()->executeS('
+        // ÍNDICE COMPACTO: todos los productos activos sin descripción.
+        // ~60 chars/producto → 1600 productos ≈ 24K tokens en vez de 140K.
+        // La IA puede encontrar cualquier producto por nombre, precio y URL.
+        $allProducts = Db::getInstance()->executeS('
             SELECT
                 p.id_product,
                 pl.name,
                 pl.link_rewrite,
-                pl.description_short,
                 p.price,
-                (SELECT cl2.name
-                 FROM `' . _DB_PREFIX_ . 'category_product` cp2
-                 LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl2
-                      ON cp2.id_category = cl2.id_category AND cl2.id_lang = ' . (int)$this->idLang . '
-                 WHERE cp2.id_product = p.id_product LIMIT 1) AS category,
                 COALESCE((
                     SELECT SUM(sa.quantity)
                     FROM `' . _DB_PREFIX_ . 'stock_available` sa
@@ -146,21 +141,99 @@ INFORMACIÓN DE LA TIENDA:
                 ), -1) AS total_stock
             FROM `' . _DB_PREFIX_ . 'product` p
             LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
-                 ON p.id_product = pl.id_product AND pl.id_lang = ' . (int)$this->idLang . '
+                 ON p.id_product = pl.id_product AND pl.id_lang = ' . $idLang . '
             WHERE p.active = 1
             ORDER BY pl.name ASC
         ');
 
-        if (empty($products) || $products === false) {
+        if (empty($allProducts) || $allProducts === false) {
             return $context . "No hay productos disponibles.\n";
         }
 
-        $link = Context::getContext()->link;
-        foreach ($products as $p) {
-            $context .= $this->formatProduct($p, $link);
+        $link       = Context::getContext()->link;
+        $allById    = [];
+        foreach ($allProducts as $p) {
+            $allById[(int)$p['id_product']] = $p;
+            $context .= $this->formatProductCompact($p, $link);
+        }
+
+        // DETALLE AMPLIADO: para productos que coinciden con las keywords del mensaje,
+        // se añaden descripción y categoría. Así la IA responde preguntas concretas
+        // con más información sin cargar las descripciones de todos los productos.
+        $words = $this->extractKeywords($userMessage);
+        if (!empty($words)) {
+            $conditions = implode(' OR ', array_map(function ($w) {
+                $w = pSQL($w);
+                return 'pl.name LIKE "%' . $w . '%" OR pl.description_short LIKE "%' . $w . '%"';
+            }, $words));
+
+            $detailed = Db::getInstance()->executeS('
+                SELECT
+                    p.id_product,
+                    pl.description_short,
+                    (SELECT cl2.name
+                     FROM `' . _DB_PREFIX_ . 'category_product` cp2
+                     LEFT JOIN `' . _DB_PREFIX_ . 'category_lang` cl2
+                          ON cp2.id_category = cl2.id_category AND cl2.id_lang = ' . $idLang . '
+                     WHERE cp2.id_product = p.id_product LIMIT 1) AS category
+                FROM `' . _DB_PREFIX_ . 'product` p
+                LEFT JOIN `' . _DB_PREFIX_ . 'product_lang` pl
+                     ON p.id_product = pl.id_product AND pl.id_lang = ' . $idLang . '
+                WHERE p.active = 1 AND (' . $conditions . ')
+                LIMIT 20
+            ');
+
+            if (!empty($detailed) && $detailed !== false) {
+                $context .= "\n--- DETALLE DE PRODUCTOS RELACIONADOS CON TU CONSULTA ---\n";
+                foreach ($detailed as $d) {
+                    $id = (int)$d['id_product'];
+                    if (!isset($allById[$id])) {
+                        continue;
+                    }
+                    $base = $allById[$id];
+                    $desc = mb_substr(strip_tags($d['description_short']), 0, 250);
+                    $cat  = $d['category'] ?: '';
+                    try {
+                        $priceWithTax = Product::getPriceStatic($id, true);
+                        $price = Tools::displayPrice($priceWithTax);
+                    } catch (Exception $e) {
+                        $price = number_format((float)$base['price'], 2) . ' €';
+                    }
+                    try {
+                        $url = $link->getProductLink($id, $base['link_rewrite']);
+                    } catch (Exception $e) {
+                        $url = '';
+                    }
+                    $totalStock = (int)$base['total_stock'];
+                    $stock = $totalStock > 0 ? 'En stock' : ($totalStock === 0 ? 'Sin stock' : 'Stock desconocido');
+
+                    $line = "- {$base['name']} | Precio: {$price} | {$stock} | Categoría: {$cat}";
+                    if ($url)  { $line .= " | URL: {$url}"; }
+                    if ($desc) { $line .= " | {$desc}"; }
+                    $context .= $line . "\n";
+                }
+            }
         }
 
         return $context;
+    }
+
+    private function formatProductCompact($p, $link)
+    {
+        try {
+            $price = Tools::displayPrice(Product::getPriceStatic((int)$p['id_product'], true));
+        } catch (Exception $e) {
+            $price = number_format((float)$p['price'], 2) . ' €';
+        }
+        try {
+            $url = $link->getProductLink((int)$p['id_product'], $p['link_rewrite']);
+        } catch (Exception $e) {
+            $url = '';
+        }
+        $totalStock = isset($p['total_stock']) ? (int)$p['total_stock'] : -1;
+        $stock = $totalStock > 0 ? 'S' : ($totalStock === 0 ? 'X' : '?');
+        // Formato ultra-compacto: Nombre | Precio | S/X/? | URL
+        return "- {$p['name']} | {$price} | {$stock}" . ($url ? " | {$url}" : '') . "\n";
     }
 
     private function formatProduct($p, $link)
