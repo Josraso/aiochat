@@ -100,13 +100,23 @@ class AioChat extends Module
 
     private function handleDiagnosticAjax()
     {
-        $test   = Tools::getValue('aiochat_test');
-        switch ($test) {
-            case 'api':     $result = $this->diagTestApi();     break;
-            case 'db':      $result = $this->diagTestDb();      break;
-            case 'docs':    $result = $this->diagTestDocs();    break;
-            case 'context': $result = $this->diagTestContext(); break;
-            default:        $result = ['ok' => false, 'message' => 'Test desconocido'];
+        // Capturar errores fatales para que nunca llegue un 500 desnudo al cliente
+        try {
+            $test = Tools::getValue('aiochat_test');
+            switch ($test) {
+                case 'api':     $result = $this->diagTestApi();     break;
+                case 'db':      $result = $this->diagTestDb();      break;
+                case 'docs':    $result = $this->diagTestDocs();    break;
+                case 'context': $result = $this->diagTestContext(); break;
+                default:        $result = ['ok' => false, 'message' => 'Test desconocido'];
+            }
+        } catch (Throwable $e) {
+            $result = [
+                'ok'      => false,
+                'message' => '❌ Error inesperado en el diagnóstico: ' . $e->getMessage()
+                           . "\nArchivo: " . basename($e->getFile()) . ':' . $e->getLine()
+                           . "\nTipo: " . get_class($e),
+            ];
         }
         while (ob_get_level() > 0) {
             ob_end_clean();
@@ -227,8 +237,13 @@ class AioChat extends Module
         try {
             $ctx    = new AioChatContext();
             $report = $ctx->diagnoseContext('sandalias talla 33');
-        } catch (Exception $e) {
-            return ['ok' => false, 'message' => '❌ Error al construir el contexto: ' . $e->getMessage()];
+        } catch (Throwable $e) {
+            return [
+                'ok'      => false,
+                'message' => '❌ Error al construir el contexto: ' . $e->getMessage()
+                           . "\n\nArchivo: " . $e->getFile() . ':' . $e->getLine()
+                           . "\n\nTipo: " . get_class($e),
+            ];
         }
 
         $labels = [

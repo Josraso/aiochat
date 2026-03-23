@@ -219,9 +219,9 @@ INFORMACIÓN DE LA TIENDA:
         // y agrupamos por id_carrier + id_zone para evitar ONLY_FULL_GROUP_BY.
         $rows = Db::getInstance()->executeS('
             SELECT
-                COALESCE(cl.name, CONCAT("Transportista #", d.id_carrier)) AS carrier_name,
+                COALESCE(cl.name, CONCAT(\'Transportista #\', d.id_carrier)) AS carrier_name,
                 MIN(d.price) AS min_price,
-                COALESCE(MAX(z.name), "general")                            AS zone_name
+                COALESCE(MAX(z.name), \'general\')                            AS zone_name
             FROM `' . _DB_PREFIX_ . 'delivery` d
             LEFT JOIN `' . _DB_PREFIX_ . 'carrier_lang` cl
                    ON cl.id_carrier = d.id_carrier AND cl.id_lang = ' . (int)$this->idLang . '
@@ -290,8 +290,8 @@ INFORMACIÓN DE LA TIENDA:
             SELECT
                 o.id_order,
                 o.reference,
-                DATE_FORMAT(o.date_add, "%d/%m/%Y") AS fecha,
-                COALESCE(osl.name, "Desconocido")   AS estado,
+                DATE_FORMAT(o.date_add, \'%d/%m/%Y\') AS fecha,
+                COALESCE(osl.name, \'Desconocido\')   AS estado,
                 oc.tracking_number,
                 car.url                              AS carrier_url,
                 car.name                             AS carrier_name
